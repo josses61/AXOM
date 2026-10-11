@@ -1,0 +1,7 @@
+node_modules
+dist
+.vite
+.cache/huggingface/
+.cache/axom-learning.json
+npm-debug.log*
+.DS_Store

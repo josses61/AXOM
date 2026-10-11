@@ -1,0 +1,30 @@
+{
+  "name": "axom-ai",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "vite --host 0.0.0.0 --port 5173",
+    "dev:server": "node server/index.js",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "server": "node server/index.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
+    "concurrently": "^9.2.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "fflate": "^0.8.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.10"
+  }
+}
