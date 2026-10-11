@@ -528,7 +528,6 @@ function App() {
         <div className="brand">
           <div className="brand-icon" aria-hidden="true">A</div>
           <span>AXOM</span>
-          <span className="brand-version">AI</span>
         </div>
 
         <button className="new-chat-button" onClick={startNewChat}>
@@ -592,7 +591,7 @@ function App() {
           {modelError && <p className="model-warning">{modelError}</p>}
           <div className="sidebar-user">
             <span className="user-avatar">A</span>
-            <span>AXOM workspace</span>
+            <span>Workspace</span>
           </div>
         </div>
       </aside>
