@@ -8,6 +8,7 @@
     "dev:client": "vite --host 0.0.0.0 --port 5173",
     "dev:server": "node server/index.js",
     "build": "tsc -b && vite build",
+    "runner:build": "docker build -t axon-runner:local ./runner",
     "preview": "vite preview --host 0.0.0.0",
     "server": "node server/index.js"
   },

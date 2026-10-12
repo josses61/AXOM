@@ -1,11 +1,9 @@
-import cors from 'cors';
 import express from 'express';
 import { apiRouter, modelInfo } from './api-router.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
 
-app.use(cors());
 app.use('/api', apiRouter);
 
 app.get('/', (req, res) => {
@@ -18,7 +16,9 @@ app.get('/', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`AXOM backend listening on http://localhost:${PORT}`);
+const HOST = process.env.AXOM_HOST || '127.0.0.1';
+
+app.listen(PORT, HOST, () => {
+  console.log(`AXOM backend listening on http://${HOST}:${PORT}`);
   console.log(`Using local SLM: ${modelInfo.id} (Q4, CPU)`);
 });

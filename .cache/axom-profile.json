@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Demo profile",
+  "notes": "Need code and docs on React and Node.",
+  "entries": [
+    {
+      "name": "demo.txt",
+      "content": "This is a demo of a profile entry.",
+      "updatedAt": "2026-10-12T21:42:11.191Z"
+    }
+  ],
+  "updatedAt": "2026-10-12T21:42:11.192Z"
+}

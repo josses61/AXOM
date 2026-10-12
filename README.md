@@ -1,6 +1,6 @@
 # AXOM
 
-AXOM is a local-first coding assistant with conversation history, focused build/fix/refactor/explain/design modes, and an editable workspace for generated code projects.
+AXOM is a local-first coding assistant with conversation history, one natural-language chat, and an editable workspace for generated code projects.
 
 ## Run locally
 
@@ -11,20 +11,33 @@ npm run dev
 
 Open http://localhost:5173/.
 
-## Local small language model
+Use the single natural-language prompt to ask AXOM to explain, fix, improve, or build something. For apps and other projects, it generates coordinated files one at a time in the editable workspace. There is no fixed project file-count setting; generation is still constrained by model context/output limits and available memory. Code execution requires the explicit Run code action and is limited to the isolated runner. AXOM does not train its own weights or provide datasets. Large model training needs suitable hardware, properly licensed data, storage, and infrastructure.
 
+## Run code in the isolated runner
 
-Choose **Create files** above the message composer to ask AXOM to plan and generate a coordinated project of up to twelve files. AXOM generates the files one at a time so later files can follow the earlier ones, checks for common unfinished placeholders, then opens them in the editable workspace.
+Install Docker, then build the local runner image once:
 
-Choose **Improve files** to request a focused change to the current workspace. AXOM chooses the files that need coordinated updates and preserves other files. In the other chat modes, the current workspace source is included as context, so you can ask questions about your code without pasting it into chat. Use **Download project ZIP** to export the workspace with its directory structure. Review generated code before running it.
+```bash
+npm run runner:build
+```
 
-Use the model picker to select **AXOM 1.0** (faster 0.5B) or **AXOM 1.1** (more capable 1.5B). AXOM disposes the active model before loading the other one to avoid keeping both large model sessions in memory. Switching models therefore takes time on the first load; weights are cached for later switches. The larger model requires about 1.9 GB of disk for Q4 weights.
+The image includes Node.js, Python, GCC/G++, Rust, Go, and Java toolchains and requires about 2.4 GB of local Docker storage. Select a JavaScript, Python, C, C++, Rust, Go, or Java source file and press **Run code**. AXOM sends the current workspace to the local runner and displays stdout, stderr, exit status, and runtime/compiler errors. Use **Ask AXON to debug this result** to put the output into the chat prompt. External package downloads and network access are unavailable during a run. Individual files are limited to 12,000 characters, the workspace to 24,000 characters and 64 files, program input to 4,000 characters, output to 48,000 characters, and execution to 8 seconds per compile/run step (20 seconds total). The runner uses a read-only container filesystem, ephemeral temporary storage, no network, a non-root user, dropped Linux capabilities, and CPU, memory, and process limits. Containers are removed after each run.
 
-The default cache directory is `.cache/huggingface`. Set `AXOM_MODEL_CACHE_DIR` to use another location, `AXOM_MODEL` to override AXOM 1.0, `AXOM_MODEL_1_1` to override AXOM 1.1, `AXOM_MODEL_PROFILE=AXOM1.1` to start with the larger profile, `AXOM_MODEL_DTYPE` to change the quantization (default `q4`), `AXOM_TEMPERATURE` to tune sampling (default `0.2`), or `AXOM_MAX_NEW_TOKENS` to adjust the overall generation limit (64–4096 tokens; default 3072). Normal chat replies are capped at 512 tokens by default, with tighter caps for explain/design modes, to avoid slow, unnecessarily long output; tune the chat cap with `AXOM_CHAT_MAX_NEW_TOKENS`. Low-temperature top-p sampling aims to avoid brittle, repetitive outputs while staying relatively consistent for coding. Both models can make mistakes. Workspace context is bounded to 24,000 characters, and individual project files to 12,000 characters per generation request.
+This is defense-in-depth, not a formally verified hostile-code sandbox. Docker and its daemon remain part of the trusted computing base. Keep AXOM bound to localhost, do not expose its API or Docker daemon to untrusted users, and do not run code you do not trust.
 
-AXOM does not fine-tune Qwen's weights. By default, it automatically saves each normal chat request and reply as a local example; turn **Learn from chats automatically** off in the sidebar to opt out. You can also choose **Teach AXOM with a correction** under an answer to save an edited example. Relevant examples guide future prompts through retrieval; they do not change model weights and may not help unrelated tasks. Examples are stored by the backend in `.cache/axom-learning.json` (override with `AXOM_LEARNING_FILE`), capped at 100, and can be cleared in the sidebar. Project generation requests and workspace files are not automatically saved. If you run AXOM on another machine, its examples are stored on that backend machine.
+When you ask to change existing workspace files, AXOM selects files for coordinated updates and preserves unrelated files. Relevant workspace files are prioritized in the bounded model context. The workspace supports HTML, CSS, JavaScript, TypeScript, JSON, Python, C, C++, Rust, Go, Java, C#, Ruby, PHP, Swift, Kotlin, SQL, shell, YAML, TOML, and common text files. Import text files, create files by language, edit them, and export the project as a ZIP. Workspace edits and conversation history are held in the current page and are not restored after a reload; export a ZIP to keep a copy. Review generated code before running it.
 
-For current public references, AXOM searches GitHub repositories for each chat or project-generation request and may use a small excerpt from matching repository READMEs. The response shows links to repositories it found. Only the latest request text is sent to GitHub; conversation history, workspace files, and generated projects are not included in the search. GitHub retrieval is best-effort and subject to GitHub's public API rate limits. This provides fresh reference context, not background crawling or model training.
+AXOM uses a local Q4 Qwen2.5-Coder model: **AXOM 1.0** (0.5B) by default, or **AXOM 1.1** (1.5B) by setting `AXOM_MODEL_PROFILE=AXOM1.1`. The larger model is more capable but still a small model and cannot be expected to match professional frontier systems. Model weights are downloaded separately and cached locally.
+
+The default cache directory is `.cache/huggingface`. Set `AXOM_MODEL_CACHE_DIR` to use another location, `AXOM_MODEL` to override AXOM 1.0, `AXOM_MODEL_1_1` to override AXOM 1.1, `AXOM_MODEL_PROFILE=AXOM1.1` to start with the larger profile, `AXOM_MODEL_DTYPE` to change the quantization (default `q4`), `AXOM_TEMPERATURE` to tune sampling (default `0.2`), or `AXOM_MAX_NEW_TOKENS` to adjust the per-generation limit (64–4096 tokens; default 3072). Normal chat replies are capped at 512 tokens by default; tune the chat cap with `AXOM_CHAT_MAX_NEW_TOKENS`. Low-temperature top-p sampling aims to avoid brittle, repetitive outputs while staying relatively consistent for coding. Both models can make mistakes. Workspace context is bounded to 24,000 characters, and individual project files to 12,000 characters per generation request.
+
+AXOM can retrieve public web search snippets and GitHub README excerpts for relevant requests and save references with their source links to `.cache/axom-knowledge.json` (override with `AXOM_KNOWLEDGE_FILE`). Locally saved coding examples and public references are retrieval memory, not model-weight training: AXOM's parameters do not change. Saved references are bounded to keep local storage manageable. Do not treat retrieved snippets as verified or current without checking their sources.
+
+AXOM's optional local profile and example data are stored under `.cache/` by the backend. This is retrieval context, not model-weight training. Never put secrets or sensitive personal data in the profile or workspace.
+
+The API binds to `127.0.0.1` by default and accepts browser API requests only from the local Vite origins `http://localhost:5173` and `http://127.0.0.1:5173`. To use another trusted development origin, set `AXOM_ALLOWED_ORIGINS` to a comma-separated exact origin allowlist; when set, it replaces the defaults. Set `AXOM_HOST` only when you deliberately need a non-loopback bind. The origin allowlist is not authentication—do not expose the API to an untrusted network.
+
+Generated code is never run automatically. Review it first, then explicitly select a supported source file and start a run. The runner is for checking program behavior and test output; it does not attempt to escape its container or teach escape techniques.
 
 The app contains the model-loading, prompt, project-planning, and inference code; large model weights are downloaded separately rather than committed to the source tree. If local inference fails or the model returns an invalid project plan, AXOM shows an error instead of returning fabricated code. The backend root (`/`) and `/api/health` report model status.
 

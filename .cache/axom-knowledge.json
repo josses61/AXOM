@@ -1,0 +1,38 @@
+[
+  {
+    "name": "10 Best Languages to Develop Games in 2026: CTO Reviews",
+    "url": "https://amela.tech/best-language-to-build-game/",
+    "language": "",
+    "kind": "Web",
+    "content": "Choosing the best language to develop games impacts performance and scaling. Compare C++, C#, Rust, & more with expert insights from our dev team.",
+    "createdAt": "2026-10-12T23:33:06.589Z",
+    "updatedAt": "2026-10-12T23:33:06.592Z"
+  },
+  {
+    "name": "Best Language for Game Development: Pros and Cons of Popular Options",
+    "url": "https://digiscorp.com/best-language-for-game-development-pros-and-cons-of-popular-options/",
+    "language": "",
+    "kind": "Web",
+    "content": "Introduction Choosing the right programming language is a critical step in game development. Whether you're building a blockbuster AAA title or a simple mobile game , the language you choose will influence the development process, performance, and player experience. But with so many options, what is the best programming language for game development? This article explores the best language ...",
+    "createdAt": "2026-10-12T23:33:06.589Z",
+    "updatedAt": "2026-10-12T23:33:06.592Z"
+  },
+  {
+    "name": "Best programming language for making a game (WITHOUT AN ENGINE)?",
+    "url": "https://www.reddit.com/r/gamedev/comments/y4boc1/best_programming_language_for_making_a_game/",
+    "language": "",
+    "kind": "Web",
+    "content": "Once you're further along and have done some work in a compiled language with static typing, you can start getting into languages with things like manual memory management or borrow checkers! If I were looking to make my own game without an engine, I'd probably be using Rust for the game logic and C++ for a lot of the rendering and audio. Reply ...",
+    "createdAt": "2026-10-12T23:33:06.589Z",
+    "updatedAt": "2026-10-12T23:33:06.592Z"
+  },
+  {
+    "name": "Language as a Game Mechanic : r/gamedesign - Reddit",
+    "url": "https://www.reddit.com/r/gamedesign/comments/n2rg4n/language_as_a_game_mechanic/",
+    "language": "",
+    "kind": "Web",
+    "content": "The game hopefully does not rely too much on any language to not be too difficult, but many non-arbitrary puzzles (of games like myst) may as well use/teach conlang-syntax and conlang-words.",
+    "createdAt": "2026-10-12T23:33:06.589Z",
+    "updatedAt": "2026-10-12T23:33:06.592Z"
+  }
+]
