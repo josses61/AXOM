@@ -42,6 +42,8 @@ const MAX_SAVED_KNOWLEDGE_CONTEXT_CHARS = 6000;
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
 ];
 const ALLOWED_ORIGINS = new Set(
   (process.env.AXOM_ALLOWED_ORIGINS
