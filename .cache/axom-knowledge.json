@@ -160,5 +160,41 @@
     "content": "# Startup App\nCreating a startup app landing page with HTML/CSS. Integrating Mailchimp for subscriptions. Engage users with updates and offers. Sleek, modern design.\n\n# Deployments\nYou can access this website at: https://romi-escobar.github.io/startup_app/\n",
     "createdAt": "2026-10-12T23:54:14.805Z",
     "updatedAt": "2026-10-13T00:00:34.899Z"
+  },
+  {
+    "name": "Troubleshooting Re-Renders, Hook Bugs, and State Flow in React ...",
+    "url": "https://mindfulchase.com/explore/troubleshooting-tips/front-end-frameworks/troubleshooting-re-renders,-hook-bugs,-and-state-flow-in-react-applications.html",
+    "language": "",
+    "kind": "Web",
+    "content": "React is a widely-used JavaScript library for building dynamic and performant user interfaces. Its declarative component-based model simplifies complex UIs, but scaling React applications often introduces advanced issues such as \"unexpected re-renders, broken memoization, hook misuse, state synchronization bugs , and performance bottlenecks\".",
+    "createdAt": "2026-10-15T01:52:20.575Z",
+    "updatedAt": "2026-10-15T01:52:20.578Z"
+  },
+  {
+    "name": "Why Most React Bugs Come From State Inconsistency, Async ... - Medium",
+    "url": "https://medium.com/@rahulkengale1110/why-inconsistent-state-async-updates-and-race-conditions-cause-most-react-and-frontend-bugs-3bd141602e0a",
+    "language": "",
+    "kind": "Web",
+    "content": "A deep dive into React 19 state management, concurrent rendering, async behavior, and the architectural mistakes that cause real-world frontend bugs",
+    "createdAt": "2026-10-15T01:52:20.575Z",
+    "updatedAt": "2026-10-15T01:52:20.578Z"
+  },
+  {
+    "name": "Debugging Race Conditions and Async Bugs in JavaScript",
+    "url": "https://blog.vibecoder.me/debugging-race-conditions-async-issues",
+    "language": "",
+    "kind": "Web",
+    "content": "Debugging race conditions and async issues in React . Techniques for stale closures, out-of-order responses, and unmounted state updates with real code examples.",
+    "createdAt": "2026-10-15T01:52:20.575Z",
+    "updatedAt": "2026-10-15T01:52:20.578Z"
+  },
+  {
+    "name": "Why Your React App's State Updates Silently Fail - and How to Catch ...",
+    "url": "https://perf.fail/why-your-react-apps-state-updates-silently-fail-and-how-to-catch-them/",
+    "language": "",
+    "kind": "Web",
+    "content": "For a deeper look at how to verify your state flow , see our guide on Common JavaScript Debugging Tricks. If you're dealing with race conditions caused by async state updates, you'll find help in How to Reproduce and Fix Race Conditions in JavaScript.",
+    "createdAt": "2026-10-15T01:52:20.576Z",
+    "updatedAt": "2026-10-15T01:52:20.578Z"
   }
 ]
