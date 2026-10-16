@@ -356,6 +356,8 @@ function normalizeAgents(input) {
       id: typeof agent.id === 'string' && /^[\w-]{1,80}$/.test(agent.id) ? agent.id : `agent-${index + 1}`,
       name,
       role,
+      team: typeof agent.team === 'string' ? agent.team.trim().slice(0, 48) : '',
+      managerId: typeof agent.managerId === 'string' && /^[\w-]{1,80}$/.test(agent.managerId) ? agent.managerId : '',
     }];
   });
 }
@@ -821,13 +823,46 @@ async function scrapePublicWebPage(value) {
 
     const html = await readLimitedResponseText(response);
     const $ = cheerio.load(html);
-    $('script, style, noscript, svg, canvas, nav, footer, aside, form, iframe, template').remove();
-    const title = $('title').first().text().replace(/\s+/g, ' ').trim().slice(0, 200);
-    let contentNode = $('main').first();
-    if (!contentNode.length || contentNode.text().trim().length < 200) contentNode = $('article').first();
-    if (!contentNode.length) contentNode = $('body');
-    const content = contentNode.text().replace(/\s+/g, ' ').trim().slice(0, MAX_WEB_PAGE_CHARS);
-    return { title, content };
+    const metadata = (selectors) => {
+      for (const selector of selectors) {
+        const value = $(selector).first().attr('content') || $(selector).first().text();
+        if (value?.trim()) return value.replace(/\s+/g, ' ').trim();
+      }
+      return '';
+    };
+    const title = metadata(['meta[property="og:title"]', 'meta[name="twitter:title"]', 'h1', 'title'])
+      .slice(0, 200);
+    const description = metadata([
+      'meta[name="description"]', 'meta[property="og:description"]', 'meta[name="twitter:description"]',
+    ]).slice(0, 500);
+    const author = metadata(['meta[name="author"]', 'meta[property="article:author"]', '[rel="author"]'])
+      .slice(0, 120);
+    const publishedAt = metadata([
+      'meta[property="article:published_time"]', 'meta[name="date"]', 'time[datetime]',
+    ]).slice(0, 80);
+    const canonical = $('link[rel="canonical"]').first().attr('href') || '';
+
+    $('script, style, noscript, svg, canvas, nav, header, footer, aside, form, iframe, template, [aria-hidden="true"]').remove();
+    $('[role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"]').remove();
+    $('[class*="advert" i], [id*="advert" i], [class*="cookie" i], [id*="cookie" i], [class*="newsletter" i]').remove();
+
+    const contentNodes = $('main, article, [role="main"], body').toArray();
+    const contentNode = contentNodes
+      .map((node) => ({ node, text: $(node).text().replace(/\s+/g, ' ').trim() }))
+      .sort((left, right) => right.text.length - left.text.length)[0];
+    const content = (contentNode?.text || '').slice(0, MAX_WEB_PAGE_CHARS);
+    const headings = (contentNode?.node ? $(contentNode.node).find('h1, h2, h3').toArray() : [])
+      .map((heading) => $(heading).text().replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    let canonicalUrl = '';
+    try {
+      const candidate = new URL(canonical, url);
+      if (candidate.protocol === 'https:' || candidate.protocol === 'http:') canonicalUrl = candidate.toString();
+    } catch {
+      canonicalUrl = '';
+    }
+    return { title: title || url.hostname, description, author, publishedAt, canonicalUrl, headings, content, url: url.toString() };
   }
   throw new Error('The web page redirected too many times.');
 }
@@ -1197,13 +1232,15 @@ async function runAgentTeam(messages, agents, workspaceFiles, deepReasoning) {
   const workspaceContext = formatProjectContext(workspaceFiles, '', latestRequest);
   const reports = [];
 
-  for (const agent of agents) {
+  const orderedAgents = [...agents].sort((left, right) => Number(Boolean(left.managerId)) - Number(Boolean(right.managerId)));
+  for (const agent of orderedAgents) {
     const report = await generateText([
       {
         role: 'system',
         content: [
           'You are a focused specialist agent in AXOM, a local coding assistant. Follow your assigned role while obeying the task and evidence provided.',
-          `Agent name: ${agent.name}. Assignment: ${agent.role}`,
+          `Agent name: ${agent.name}. Team: ${agent.team || 'General'}. ${agent.managerId ? `Reports to agent ${agent.managerId}.` : 'You are a group lead.'} Assignment: ${agent.role}`,
+          reports.length > 0 ? `Teammate reports so far:\n${reports.join('\n\n').slice(-MAX_AGENT_REPORT_CHARS * 4)}\nBuild on useful findings, correct mistakes, and add your distinct expertise.` : '',
           'Return a concise, actionable report for the lead agent. Point out assumptions and risks. Do not claim to have edited files, run commands, or verified results.',
           deepReasoning ? 'Prioritize root causes, practical options, and validation.' : '',
         ].filter(Boolean).join(' '),
@@ -1216,7 +1253,7 @@ async function runAgentTeam(messages, agents, workspaceFiles, deepReasoning) {
         ].filter(Boolean).join('\n\n').slice(0, MAX_CONTEXT_CHARS),
       },
     ], Math.min(512, MAX_CHAT_NEW_TOKENS));
-    reports.push(`Agent ${agent.name} (${agent.role}):\n${report.slice(0, MAX_AGENT_REPORT_CHARS)}`);
+    reports.push(`Agent ${agent.name}${agent.team ? ` · ${agent.team}` : ''} (${agent.role}):\n${report.slice(0, MAX_AGENT_REPORT_CHARS)}`);
   }
 
   return reports.join('\n\n');
@@ -1668,7 +1705,12 @@ export function createAxomApiMiddleware() {
           const page = await scrapePublicWebPage(url.toString());
           return sendJson(res, 200, {
             title: page.title || url.hostname,
-            url: url.toString(),
+            url: page.url,
+            description: page.description,
+            author: page.author,
+            publishedAt: page.publishedAt,
+            canonicalUrl: page.canonicalUrl,
+            headings: page.headings,
             content: page.content,
           });
         } catch (error) {
@@ -1696,6 +1738,35 @@ export function createAxomApiMiddleware() {
           return sendJson(res, 200, { repositories });
         })
         .catch((error) => sendJson(res, 503, { error: getErrorMessage(error) }));
+    }
+
+    if (apiPath === '/github/create' && req.method === 'POST') {
+      return jsonParser(req, res, async (parseError) => {
+        if (parseError) return sendJson(res, 400, { error: 'Invalid JSON payload.' });
+        const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+        if (!/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === '.' || name === '..') {
+          return sendJson(res, 400, { error: 'Choose a repository name using letters, numbers, dots, hyphens, or underscores.' });
+        }
+        if (typeof req.body?.private !== 'boolean') {
+          return sendJson(res, 400, { error: 'Choose whether the repository should be private.' });
+        }
+        try {
+          await runGitHubCli([
+            'repo', 'create', name,
+            req.body.private ? '--private' : '--public',
+            '--confirm',
+          ]);
+          const fullName = (await runGitHubCli([
+            'repo', 'view', name, '--json', 'nameWithOwner', '--jq', '.nameWithOwner',
+          ])).trim();
+          if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) {
+            throw new Error('GitHub created the repository but did not return its owner and name.');
+          }
+          return sendJson(res, 201, { repository: fullName, private: req.body.private });
+        } catch (error) {
+          return sendJson(res, 503, { error: getErrorMessage(error) });
+        }
+      });
     }
 
     if (apiPath === '/github/import' && req.method === 'POST') {

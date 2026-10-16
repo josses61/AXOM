@@ -45,57 +45,12 @@
     "updatedAt": "2026-10-12T23:58:27.447Z"
   },
   {
-    "name": "10 subscription landing page examples for maximum sign-ups",
-    "url": "https://www.apexure.com/blog/subscription-landing-page-examples",
-    "language": "",
-    "kind": "Web",
-    "content": "Learn how subscription landing pages work and how they can help you grow your brand. Filled with examples and best practices, check out the article now.",
-    "createdAt": "2026-10-12T23:54:14.481Z",
-    "updatedAt": "2026-10-13T00:00:34.899Z"
-  },
-  {
-    "name": "Startup Landing Page: Definition, How to Create & 5 Examples",
-    "url": "https://landingi.com/blog/startup-landing-page-examples/",
-    "language": "",
-    "kind": "Web",
-    "content": "Explore landing page examples, get inspired, and create your own startup landing page that will be your ticket to converting more visitors into leads or customers.",
-    "createdAt": "2026-10-12T23:54:14.481Z",
-    "updatedAt": "2026-10-13T00:00:34.899Z"
-  },
-  {
     "name": "Startup Landing Page Templates — Landingfolio",
     "url": "https://www.landingfolio.com/templates/startup",
     "language": "",
     "kind": "Web",
     "content": "Beautiful, customizable Startup landing page templates for every project. Get the best Startup landing page template for your business with our collection of 24 free and premium templates.",
     "createdAt": "2026-10-12T23:54:14.481Z",
-    "updatedAt": "2026-10-13T00:00:34.899Z"
-  },
-  {
-    "name": "10 Subscription Landing Page Examples to Test in 2025",
-    "url": "https://stay.ai/blog/subscription-landing-pages/",
-    "language": "",
-    "kind": "Web",
-    "content": "Whether you're optimizing an evergreen Subscribe & Save page or designing a paid-traffic subscription landing page , keeping these key features in mind is how you can turn curious visitors into loyal subscribers.",
-    "createdAt": "2026-10-12T23:54:14.481Z",
-    "updatedAt": "2026-10-13T00:00:34.899Z"
-  },
-  {
-    "name": "AaronSiby15/startup-landing-page",
-    "url": "https://github.com/AaronSiby15/startup-landing-page",
-    "language": "HTML",
-    "kind": "GitHub",
-    "content": "# 🚀 Startup Landing Page\n\nA responsive **Startup Landing Page** built with **HTML, CSS, and Bootstrap**, designed to showcase your product or event and capture leads via **Mailchimp email integration**.\n\n🌐 **Live Demo**: [Startup Landing Page](https://aaronsiby15.github.io/startup-landing-page/)\n\n---\n\n## 📸 Preview\n<img width=\"1497\" height=\"615\" alt=\"image\" src=\"https://github.com/user-attachments/assets/0caf4194-44d8-4cde-8135-82d5d2d6e42a\" />\n\n---\n\n## ✨ Features\n- 🎨 Modern and responsive design using **Bootstrap 5**\n- 📱 Mobile-friendly layout\n- 📧 **Mailchimp integration** for email subscriptions\n- ⚡ Lightweight and fast-loading\n- 🛠️ Easy to customize\n\n---\n\n## 🛠️ Tech Stack\n- **HTML5**\n- **CSS3**\n- **Bootstrap 5**\n- **Mailchimp** (for email service integration)\n\n---\n",
-    "createdAt": "2026-10-12T23:54:14.495Z",
-    "updatedAt": "2026-10-13T00:00:34.899Z"
-  },
-  {
-    "name": "romi-escobar/startup_app",
-    "url": "https://github.com/romi-escobar/startup_app",
-    "language": "HTML",
-    "kind": "GitHub",
-    "content": "# Startup App\nCreating a startup app landing page with HTML/CSS. Integrating Mailchimp for subscriptions. Engage users with updates and offers. Sleek, modern design.\n\n# Deployments\nYou can access this website at: https://romi-escobar.github.io/startup_app/\n",
-    "createdAt": "2026-10-12T23:54:14.805Z",
     "updatedAt": "2026-10-13T00:00:34.899Z"
   },
   {
@@ -259,5 +214,50 @@
     "content": "Disallowed Nullish and Truthy Checks ​Maybe you've written a regex and forgotten to call .test(...) on it:tsif (/0x[0-9a-f]/) { // Oops! This block always runs. // ... }or maybe you've accidentally written => (which creates an arrow function) instead of >= (the greater-than-or-equal-to operator):tsif ((x) => 0) { // Oops! This block always runs. // ... }or maybe you've tried to use a default value with ??, but mixed up the precedence of ?? and a comparison operator like <:tsfunction isValid( value: string | number, options: any, strictness: \"strict\" | \"loose\" ) { if (strictness === \"loose\") { value = +value; } return value < options.max ?? 100; // Oops! This is parsed as (value < options.max) ?? 100 }or maybe you've misplaced a parenthesis in a complex expression:tsif ( isValid(primaryValue, \"strict\") || isValid(secondaryValue, \"strict\") || isValid(primaryValue, \"loose\" || isValid(secondaryValue, \"loose\")) ) { // ^^^^ 👀 Did we forget a closing ')'? }None of these examples do what the author intended, but they're all valid JavaScript code. Previously TypeScript also quietly accepted these examples.But with a little bit of experimentation, we found that many many bugs could be caugh",
     "createdAt": "2026-10-16T18:08:45.044Z",
     "updatedAt": "2026-10-16T18:08:45.046Z"
+  },
+  {
+    "name": "10 Subscription Landing Page Examples For Maximum Sign-Ups",
+    "url": "https://www.apexure.com/blog/subscription-landing-page-examples",
+    "language": "",
+    "kind": "Web",
+    "content": "Services Landing pagesLanding page optimisationShopify landing pagesSaaS landing pagesLanding page subscription Conversion optimisationConversion trackingCRO for US businessesCRO for UK businesses WebsitesWebsite maintenanceWebflow developmentFramer agencyWordPress web designWhite label website design SystemsCustom CRMQuoting softwareGoHighLevel agencyGoHighLevel alternativeHubSpot alternative Work Case studiesLanding page examplesSuccess stories Resources BlogFree landing page auditNewsWebinar course About Who we areOur teamPartnersAI training by FautonsContact Book a systems reviewFree · 30 minutes · a written read within 48 hours info@apexure.com+44 (0) 20 8050 1323UK hours, which is the East Coast morning Blog · Examples · 9 min read 10 subscription landing page examples for maximum sign-ups Ten subscription pages across newsletters, SaaS plans, memberships, streaming and boxes, with what each one does to turn a visitor into a recurring customer. Waseem BashirFounder and CEO, ApexureUpdated 3 Jun 2025First published 18 Mar 2025 In short 5 points · the full post is 9 minutesDecide the funnel stage first. A newsletter page captures awareness with one field, a SaaS plans page closes hot leads after a trial, and the design follows that goal.Demand Curve's newsletter page states three USPs above a one-field form, that it is actionable, free and twice weekly, then previews an issue so visitors can judge quality first.SaaS pages put the pricing tiers in the first fold. EmailOctopus hides the full comparison behind a toggle, Zoho Desk adds a monthly to yearly switch and a 'Popular' tag.Netflix runs a click-through page. Email first, then a multi-step form whose first slide states the benefits before asking anything else, which keeps sign-up friction low.Box pages lead with the deal. Dollar Shave Club opens on a discount and kit photos, Perfect Bar on 10% off, free shipping and skip or cancel anytime. A subscription landing page is necessary to any marketing campaign, whether for a newsletter or a paid SaaS service. These pages are a gateway to acquiring new users and driving conversions. Subscription pages can be built to capture leads at any marketing funnel stage, be it at the awareness level or when prospects are ready to commit. It becomes essential to set clear goals for these landing pages and make sure their design and content advocate for the same. In th",
+    "createdAt": "2026-10-12T23:54:14.481Z",
+    "updatedAt": "2026-10-16T19:33:15.942Z"
+  },
+  {
+    "name": "Startup Landing Page: Definition, How to Create & 5 Examples",
+    "url": "https://landingi.com/blog/startup-landing-page-examples/",
+    "language": "",
+    "kind": "Web",
+    "content": "Startup Landing Page: Definition, How to Create & 5 Examples Start-up landing pages focus on converting visitors through customized content that resonates with the startup ecosystem. Learn how to craft these crucial pages, discover best practices, and view real examples to boost your conversion rates.",
+    "createdAt": "2026-10-12T23:54:14.481Z",
+    "updatedAt": "2026-10-16T19:33:15.942Z"
+  },
+  {
+    "name": "10 Subscription Landing Page Ideas To Test in 2025",
+    "url": "https://stay.ai/blog/subscription-landing-pages/",
+    "language": "",
+    "kind": "Web",
+    "content": "Home Blog 10 Subscription Landing Page Ideas To Test in 2025 6 min read October 15, 202510 Subscription Landing Page Ideas To Test in 2025While we do see brands acquire new subscribers by driving directly to the PDP, the brands that have the most success doing so have extremely subscription-optimized product pages. If you are running paid traffic with the intention of acquiring new subscribers, and want to test out a subscription landing page built specifically for that audience, we’ve got some tips/tactics for you! More awesome subscribe page examples from Stay’s top brands coming up – broken down by a few of the most effective strategies for subscriber acquisition.What are the Best Subscription Landing Pages?There are a few consistent characteristics of a subscribe landing page that drive high conversion rates across brands. Basically, they’re laser-focused on clarity, value, and trust. The best subscription page examples make it immediately obvious what the offer is, why it’s worth subscribing to, and how flexible the experience will be. It’s also crucial to clearly highlight pricing and savings, reinforce benefits such as free gifts or exclusive discounts, and establish credibility through reviews and strong social proof. Whether you’re optimizing an evergreen Subscribe & Save page or designing a paid-traffic subscription landing page, keeping these key features in mind is how you can turn curious visitors into loyal subscribers.Subscription Page Examples:Clevr: Starter kit subscription landing page featuring free gifts, health education, 15% future credit, and flexible recurring ordersIntake Breathing: Discount-focused LP offering $25 off, a free travel case, and strong social proof with reviewsBeauty by Earth: Build Your Own Bundle subscription page highlighting personalized bundles, UGC, flexible options, and visible savingsMagic Spoon: Custom bundle landing page showcasing 20% off, free gift set, bold visuals, and verified customer reviewsCurious Elixirs: Welcome offer LP with 28% discount, order flexibility, and high-quality product visualsThe Lift Box: Social proof-driven subscription landing page featuring 20,000+ subscribers, user videos, press mentions, and a $17 discountClean Skin Club: Trial-to-subscription landing page with free container offer, sticky CTAs, and consistent conversion messagingBeautyLux: Subscribe & Save landing page emphasizi",
+    "createdAt": "2026-10-12T23:54:14.481Z",
+    "updatedAt": "2026-10-16T19:33:15.942Z"
+  },
+  {
+    "name": "AaronSiby15/startup-landing-page",
+    "url": "https://github.com/AaronSiby15/startup-landing-page",
+    "language": "HTML",
+    "kind": "GitHub",
+    "content": "# 🚀 Startup Landing Page\n\nA responsive **Startup Landing Page** built with **HTML, CSS, and Bootstrap**, designed to showcase your product or event and capture leads via **Mailchimp email integration**.\n\n🌐 **Live Demo**: [Startup Landing Page](https://aaronsiby15.github.io/startup-landing-page/)\n\n---\n\n## 📸 Preview\n<img width=\"1497\" height=\"615\" alt=\"image\" src=\"https://github.com/user-attachments/assets/0caf4194-44d8-4cde-8135-82d5d2d6e42a\" />\n\n---\n\n## ✨ Features\n- 🎨 Modern and responsive design using **Bootstrap 5**\n- 📱 Mobile-friendly layout\n- 📧 **Mailchimp integration** for email subscriptions\n- ⚡ Lightweight and fast-loading\n- 🛠️ Easy to customize\n\n---\n\n## 🛠️ Tech Stack\n- **HTML5**\n- **CSS3**\n- **Bootstrap 5**\n- **Mailchimp** (for email service integration)\n\n---\n",
+    "createdAt": "2026-10-12T23:54:14.495Z",
+    "updatedAt": "2026-10-16T19:33:15.942Z"
+  },
+  {
+    "name": "romi-escobar/startup_app",
+    "url": "https://github.com/romi-escobar/startup_app",
+    "language": "HTML",
+    "kind": "GitHub",
+    "content": "# Startup App\nCreating a startup app landing page with HTML/CSS. Integrating Mailchimp for subscriptions. Engage users with updates and offers. Sleek, modern design.\n\n# Deployments\nYou can access this website at: https://romi-escobar.github.io/startup_app/\n",
+    "createdAt": "2026-10-12T23:54:14.805Z",
+    "updatedAt": "2026-10-16T19:33:15.942Z"
   }
 ]

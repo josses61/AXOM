@@ -26,6 +26,26 @@ type ManagedAgent = {
   name: string;
   role: string;
   enabled: boolean;
+  team: string;
+  managerId: string;
+};
+
+type GroupChatMessage = {
+  id: string;
+  sender: string;
+  role: 'user' | 'assistant';
+  text: string;
+};
+
+type ScrapedPage = {
+  title: string;
+  url: string;
+  content: string;
+  description: string;
+  author: string;
+  publishedAt: string;
+  canonicalUrl: string;
+  headings: string[];
 };
 
 type ManagedTask = {
@@ -150,6 +170,15 @@ const quickPrompts = [
   'Fix a React app with state bugs and broken async flows',
 ];
 
+const agentRoleTemplates = [
+  { name: 'Researcher', role: 'Find relevant documentation, APIs, constraints, and current best practices. Cite sources and separate facts from assumptions.' },
+  { name: 'Builder', role: 'Turn the request into a coherent implementation. Identify files to change, make focused code proposals, and call out validation steps.' },
+  { name: 'Reviewer', role: 'Review proposed work for bugs, security risks, missing requirements, and useful tests. Prioritize actionable findings.' },
+  { name: 'Designer', role: 'Shape accessible, clear interface structure and visual details. Consider responsive behavior and real user workflows.' },
+  { name: 'Security', role: 'Threat-model the request, find trust boundaries and data risks, and suggest practical mitigations.' },
+  { name: 'Writer', role: 'Create concise, accurate documentation and user-facing copy that matches the product and implementation.' },
+];
+
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 function loadManagedTasks(): ManagedTask[] {
@@ -169,10 +198,29 @@ function loadManagedTasks(): ManagedTask[] {
 }
 
 const defaultAgents: ManagedAgent[] = [
-  { id: 'research', name: 'Scout', role: 'Research relevant APIs, documentation, constraints, and current best practices.', enabled: true },
-  { id: 'builder', name: 'Builder', role: 'Turn the request into a coherent implementation and identify the files or steps required.', enabled: true },
-  { id: 'reviewer', name: 'Reviewer', role: 'Review the proposed solution for bugs, security risks, missing requirements, and useful tests.', enabled: true },
+  { id: 'research', name: 'Scout', role: 'Research relevant APIs, documentation, constraints, and current best practices.', enabled: true, team: 'Studio', managerId: '' },
+  { id: 'builder', name: 'Builder', role: 'Turn the request into a coherent implementation and identify the files or steps required.', enabled: true, team: 'Studio', managerId: 'research' },
+  { id: 'reviewer', name: 'Reviewer', role: 'Review the proposed solution for bugs, security risks, missing requirements, and useful tests.', enabled: true, team: 'Studio', managerId: 'research' },
 ];
+
+function loadGroupChats(): Record<string, GroupChatMessage[]> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem('axom-group-chats') || '{}');
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+    return Object.fromEntries(Object.entries(stored).flatMap(([team, messages]) => {
+      if (!Array.isArray(messages)) return [];
+      const valid = messages.flatMap((message): GroupChatMessage[] =>
+        message && typeof message.id === 'string' && typeof message.sender === 'string' &&
+        (message.role === 'user' || message.role === 'assistant') && typeof message.text === 'string'
+          ? [{ id: message.id, sender: message.sender.slice(0, 48), role: message.role, text: message.text.slice(0, 6000) }]
+          : [],
+      ).slice(-40);
+      return valid.length > 0 ? [[team.slice(0, 48), valid]] : [];
+    }));
+  } catch {
+    return {};
+  }
+}
 
 function loadManagedAgents(): ManagedAgent[] {
   try {
@@ -188,6 +236,8 @@ function loadManagedAgents(): ManagedAgent[] {
           name: agent.name.slice(0, 48),
           role: agent.role.slice(0, 400),
           enabled: Boolean(agent.enabled),
+          team: typeof agent.team === 'string' ? agent.team.slice(0, 48) : 'Studio',
+          managerId: typeof agent.managerId === 'string' ? agent.managerId.slice(0, 80) : '',
         }]
         : [],
     );
@@ -476,20 +526,47 @@ function App() {
   const [modelProfile, setModelProfile] = useState<ModelProfile>('AXOM1.0');
   const [agents, setAgents] = useState<ManagedAgent[]>(loadManagedAgents);
   const [tasks, setTasks] = useState<ManagedTask[]>(loadManagedTasks);
+  const [agentDraftName, setAgentDraftName] = useState('');
+  const [agentDraftTeam, setAgentDraftTeam] = useState('Studio');
+  const [agentDraftRole, setAgentDraftRole] = useState(agentRoleTemplates[1].role);
+  const [agentDraftTemplate, setAgentDraftTemplate] = useState('Builder');
+  const [agentDraftManagerId, setAgentDraftManagerId] = useState('');
+  const [groupChats, setGroupChats] = useState<Record<string, GroupChatMessage[]>>(loadGroupChats);
+  const [activeChatTeam, setActiveChatTeam] = useState('Studio');
+  const [activeView, setActiveView] = useState<'assistant' | 'team'>('assistant');
+  const [groupChatDraft, setGroupChatDraft] = useState('');
+  const [groupChatBusy, setGroupChatBusy] = useState(false);
+  const [groupChatError, setGroupChatError] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState(() => localStorage.getItem('axom-email') || '');
   const [webUrl, setWebUrl] = useState('');
   const [webLoading, setWebLoading] = useState(false);
   const [webError, setWebError] = useState('');
-  const [scrapedPage, setScrapedPage] = useState<{ title: string; url: string; content: string } | null>(null);
+  const [scrapedPage, setScrapedPage] = useState<ScrapedPage | null>(null);
   const [githubAccount, setGithubAccount] = useState<{ login: string; url: string } | null>(null);
   const [githubRepositories, setGithubRepositories] = useState<GitHubRepository[]>([]);
   const [githubRepository, setGithubRepository] = useState('');
+  const [githubTrustedAuthors, setGithubTrustedAuthors] = useState<string[]>(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem('axom-github-trusted-authors') || '[]');
+      return Array.isArray(stored) ? stored.filter((author): author is string => typeof author === 'string').slice(0, 50) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [githubAuthorInput, setGithubAuthorInput] = useState('');
+  const [newRepositoryName, setNewRepositoryName] = useState('');
+  const [newRepositoryPrivate, setNewRepositoryPrivate] = useState(true);
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState('');
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const activeAgents = agents.filter((agent) => agent.enabled);
+  const agentTeams = [...new Set(agents.map((agent) => agent.team.trim()).filter(Boolean))];
+  if (agentTeams.length === 0) agentTeams.push('Studio');
+  const selectedTeamAgents = agents.filter((agent) => agent.team === activeChatTeam && agent.enabled);
+  const selectedGitHubOwner = githubRepository.split('/')[0] || '';
+  const selectedGitHubOwnerTrusted = githubTrustedAuthors.some((author) => author.toLowerCase() === selectedGitHubOwner.toLowerCase());
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -504,10 +581,19 @@ function App() {
   }, [tasks]);
 
   useEffect(() => {
+    localStorage.setItem('axom-group-chats', JSON.stringify(groupChats));
+  }, [groupChats]);
+
+  useEffect(() => {
+    localStorage.setItem('axom-github-trusted-authors', JSON.stringify(githubTrustedAuthors));
+  }, [githubTrustedAuthors]);
+
+  useEffect(() => {
     localStorage.setItem('axom-email', emailAddress);
   }, [emailAddress]);
 
   const startNewChat = () => {
+    setActiveView('assistant');
     setMessages([{
       id: 1,
       role: 'assistant',
@@ -699,11 +785,30 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: webUrl.trim() }),
       });
-      const payload = await response.json() as { title?: string; url?: string; content?: string; error?: string };
+      const payload = await response.json() as {
+        title?: string;
+        url?: string;
+        content?: string;
+        description?: string;
+        author?: string;
+        publishedAt?: string;
+        canonicalUrl?: string;
+        headings?: string[];
+        error?: string;
+      };
       if (!response.ok || !payload.url || !payload.content) {
         throw new Error(payload.error || 'Could not read this web page.');
       }
-      setScrapedPage({ title: payload.title || payload.url, url: payload.url, content: payload.content });
+      setScrapedPage({
+        title: payload.title || payload.url,
+        url: payload.url,
+        content: payload.content,
+        description: payload.description || '',
+        author: payload.author || '',
+        publishedAt: payload.publishedAt || '',
+        canonicalUrl: payload.canonicalUrl || '',
+        headings: Array.isArray(payload.headings) ? payload.headings.filter((heading) => typeof heading === 'string').slice(0, 12) : [],
+      });
     } catch (error) {
       setWebError(error instanceof Error ? error.message : 'Could not read this web page.');
     } finally {
@@ -722,6 +827,106 @@ function App() {
     };
     setTasks((current) => [task, ...current].slice(0, 100));
     setTaskTitle('');
+  };
+
+  const handleAddAgent = () => {
+    const name = agentDraftName.trim();
+    const team = agentDraftTeam.trim() || 'Studio';
+    const role = agentDraftRole.trim();
+    if (!name || !role || agents.length >= 8) return;
+    const managerId = agents.some((agent) =>
+      agent.id === agentDraftManagerId && agent.team === team && !agent.managerId,
+    ) ? agentDraftManagerId : '';
+    setAgents((current) => [...current, {
+      id: newId(),
+      name: name.slice(0, 48),
+      role: role.slice(0, 400),
+      enabled: true,
+      team: team.slice(0, 48),
+      managerId,
+    }]);
+    setActiveChatTeam(team);
+    setActiveView('team');
+    setAgentDraftName('');
+    setAgentDraftManagerId('');
+  };
+
+  const handleGroupChatSend = async () => {
+    const text = groupChatDraft.trim();
+    if (!text || groupChatBusy || selectedTeamAgents.length === 0) return;
+    const userMessage: GroupChatMessage = { id: newId(), sender: 'You', role: 'user', text };
+    const conversation = [...(groupChats[activeChatTeam] || []), userMessage].slice(-20);
+    setGroupChats((current) => ({ ...current, [activeChatTeam]: [...(current[activeChatTeam] || []), userMessage].slice(-40) }));
+    setGroupChatDraft('');
+    setGroupChatBusy(true);
+    setGroupChatError('');
+    try {
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: conversation.map(({ role, text: content }) => ({ role, content })),
+          files: files.map(({ name, value }) => ({ path: name, content: value })),
+          deepReasoning,
+          agents: selectedTeamAgents.map(({ id, name, role, managerId, team }) => ({ id, name, role, managerId, team })),
+        }),
+      });
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok || typeof payload.message !== 'string' || !payload.message.trim()) {
+        throw new Error(payload.error || 'The team could not complete this group chat turn.');
+      }
+      const reply: GroupChatMessage = { id: newId(), sender: `${activeChatTeam} team`, role: 'assistant', text: payload.message.trim() };
+      setGroupChats((current) => ({ ...current, [activeChatTeam]: [...(current[activeChatTeam] || []), reply].slice(-40) }));
+    } catch (error) {
+      setGroupChatError(error instanceof Error ? error.message : 'The team chat request failed.');
+      const reply: GroupChatMessage = {
+        id: newId(),
+        sender: 'AXOM',
+        role: 'assistant',
+        text: 'This team chat turn could not be completed.',
+      };
+      setGroupChats((current) => ({ ...current, [activeChatTeam]: [...(current[activeChatTeam] || []), reply].slice(-40) }));
+    } finally {
+      setGroupChatBusy(false);
+    }
+  };
+
+  const handleTrustGitHubAuthor = (input = githubAuthorInput) => {
+    const author = input.trim().replace(/^@/, '');
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})$/.test(author)) {
+      setGithubError('Enter a valid GitHub username to add to your local trusted-author list.');
+      return;
+    }
+    setGithubTrustedAuthors((current) => current.some((item) => item.toLowerCase() === author.toLowerCase())
+      ? current
+      : [...current, author].slice(-50));
+    setGithubAuthorInput('');
+    setGithubError('');
+  };
+
+  const handleCreateGitHubRepository = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newRepositoryName.trim();
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === '.' || name === '..' || githubLoading) return;
+    setGithubLoading(true);
+    setGithubError('');
+    try {
+      const response = await fetch('/api/github/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, private: newRepositoryPrivate }),
+      });
+      const payload = await response.json() as { repository?: string; error?: string };
+      if (!response.ok || !payload.repository) throw new Error(payload.error || 'Could not create this repository.');
+      setNewRepositoryName('');
+      await refreshGitHub();
+      setGithubRepository(payload.repository);
+      setGithubError(`Created ${payload.repository}${newRepositoryPrivate ? ' as a private repository' : ''}.`);
+    } catch (error) {
+      setGithubError(error instanceof Error ? error.message : 'Could not create this repository.');
+    } finally {
+      setGithubLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -752,7 +957,7 @@ function App() {
           messages: conversation.map(({ role, text }) => ({ role, content: text })),
           files: files.map(({ name, value }) => ({ path: name, content: value })),
           deepReasoning,
-          agents: requestAgents.map(({ id, name, role }) => ({ id, name, role })),
+          agents: requestAgents.map(({ id, name, role, managerId, team }) => ({ id, name, role, managerId, team })),
         }),
       });
 
@@ -987,11 +1192,35 @@ function App() {
 
         <div className="sidebar-panel conversation-sidebar">
           <div className="panel-label">Work desk</div>
-          <button className="nav-item active current-chat" onClick={startNewChat}>
+          <button className={`nav-item current-chat ${activeView === 'assistant' ? 'active' : ''}`} onClick={startNewChat}>
             <span aria-hidden="true">◌</span>
             <span>Team inbox</span>
           </button>
         </div>
+
+        <section className="channel-navigation" aria-label="Team channels">
+          <div className="channel-navigation-heading">
+            <span>Channels</span>
+            <button onClick={() => setAgentsOpen(true)} title="Manage teams and agents" aria-label="Manage teams and agents">＋</button>
+          </div>
+          <div className="channel-list">
+            {agentTeams.map((team) => (
+              <button
+                key={team}
+                className={`channel-link ${activeView === 'team' && activeChatTeam === team ? 'selected' : ''}`}
+                onClick={() => {
+                  setActiveChatTeam(team);
+                  setActiveView('team');
+                  setAgentsOpen(false);
+                }}
+              >
+                <span className="channel-hash">#</span>
+                <span className="channel-name">{team}</span>
+                <span className="channel-count">{agents.filter((agent) => agent.team === team && agent.enabled).length}</span>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <div className="panel-block">
           <div className="panel-header">
@@ -1025,8 +1254,25 @@ function App() {
           <div className="chat-title">
             <button className="mobile-new-chat" onClick={startNewChat} aria-label="Start a new chat">＋</button>
             <strong>AXON</strong>
-            <span className="model-title">Operations desk</span>
+            <span className="model-title">{activeView === 'team' ? `# ${activeChatTeam}` : 'Team inbox'}</span>
           </div>
+
+          <label className="mobile-channel-control">
+            <span className="visually-hidden">Choose a channel</span>
+            <select
+              value={activeView === 'team' ? activeChatTeam : '__inbox'}
+              onChange={(event) => {
+                if (event.target.value === '__inbox') startNewChat();
+                else {
+                  setActiveChatTeam(event.target.value);
+                  setActiveView('team');
+                }
+              }}
+            >
+              <option value="__inbox">Team inbox</option>
+              {agentTeams.map((team) => <option key={team} value={team}># {team}</option>)}
+            </select>
+          </label>
 
           <div className="status-row">
             <label className="model-profile-control">
@@ -1082,9 +1328,85 @@ function App() {
               </div>
               <button className="workspace-close" onClick={() => setAgentsOpen(false)} aria-label="Close agent manager">×</button>
             </div>
+            <section className="agent-create-panel">
+              <div className="agent-create-heading">
+                <div><h3>Create an agent</h3><p>Choose a specialty, then tailor its instructions.</p></div>
+                <span>{agents.length}/8</span>
+              </div>
+              <form className="agent-create-form" onSubmit={(event) => { event.preventDefault(); handleAddAgent(); }}>
+                <label className="agent-field">
+                  <span>Name</span>
+                  <input
+                    value={agentDraftName}
+                    onChange={(event) => setAgentDraftName(event.target.value)}
+                    placeholder="e.g. API Scout"
+                    maxLength={48}
+                    required
+                  />
+                </label>
+                <label className="agent-field">
+                  <span>Team</span>
+                  <input
+                    value={agentDraftTeam}
+                    onChange={(event) => {
+                      const team = event.target.value;
+                      setAgentDraftTeam(team);
+                      setAgentDraftManagerId(agents.find((agent) => agent.team === team && !agent.managerId)?.id || '');
+                    }}
+                    placeholder="Create or choose a team"
+                    maxLength={48}
+                    list="agent-team-options"
+                  />
+                  <datalist id="agent-team-options">{agentTeams.map((team) => <option value={team} key={team} />)}</datalist>
+                </label>
+                <label className="agent-field">
+                  <span>Role template</span>
+                  <select
+                    value={agentDraftTemplate}
+                    onChange={(event) => {
+                      const template = agentRoleTemplates.find((item) => item.name === event.target.value);
+                      setAgentDraftTemplate(template?.name || 'Custom');
+                      if (template) setAgentDraftRole(template.role);
+                    }}
+                  >
+                    {agentRoleTemplates.map((template) => <option key={template.name} value={template.name}>{template.name}</option>)}
+                    <option value="Custom">Custom role</option>
+                  </select>
+                </label>
+                <label className="agent-field">
+                  <span>Role instructions</span>
+                  <textarea
+                    value={agentDraftRole}
+                    onChange={(event) => {
+                      setAgentDraftRole(event.target.value);
+                      setAgentDraftTemplate('Custom');
+                    }}
+                    maxLength={400}
+                    rows={3}
+                    required
+                  />
+                </label>
+                <label className="agent-field">
+                  <span>Reports to</span>
+                  <select value={agentDraftManagerId} onChange={(event) => setAgentDraftManagerId(event.target.value)}>
+                    <option value="">Group lead</option>
+                    {agents.filter((agent) => agent.team === agentDraftTeam.trim() && !agent.managerId)
+                      .map((agent) => <option key={agent.id} value={agent.id}>{agent.name || 'Unnamed agent'}</option>)}
+                  </select>
+                </label>
+                <button className="action-button agent-add" type="submit" disabled={agents.length >= 8 || !agentDraftName.trim() || !agentDraftRole.trim()}>
+                  {agents.length >= 8 ? 'Agent limit reached' : 'Create agent'}
+                </button>
+              </form>
+            </section>
             <div className="agent-list">
               {agents.map((agent) => (
-                <section className="agent-item" key={agent.id}>
+                <details className="agent-item" key={agent.id}>
+                  <summary className="agent-summary">
+                    <span className="agent-summary-name">{agent.name || 'Unnamed agent'}</span>
+                    <span className="agent-summary-meta">{agent.team || 'No team'} · {agent.managerId ? 'Specialist' : 'Group lead'}</span>
+                  </summary>
+                  <div className="agent-editor-fields">
                   <div className="agent-item-topline">
                     <label className="agent-enabled">
                       <input
@@ -1095,6 +1417,9 @@ function App() {
                       />
                       <span>Assigned</span>
                     </label>
+                    <span className="agent-rank">
+                      {agent.managerId ? 'Specialist' : `Group lead · ${agents.filter((item) => item.managerId === agent.id).length}`}
+                    </span>
                     <button
                       className="agent-remove"
                       onClick={() => setAgents((current) => current.filter((item) => item.id !== agent.id))}
@@ -1113,30 +1438,41 @@ function App() {
                     />
                   </label>
                   <label className="agent-field">
+                    <span>Team</span>
+                    <input
+                      value={agent.team}
+                      maxLength={48}
+                      onChange={(event) => setAgents((current) => current.map((item) =>
+                        item.id === agent.id ? { ...item, team: event.target.value, managerId: '' } : item))}
+                    />
+                  </label>
+                  <label className="agent-field">
+                    <span>Reports to</span>
+                    <select
+                      value={agent.managerId}
+                      onChange={(event) => setAgents((current) => current.map((item) =>
+                        item.id === agent.id ? { ...item, managerId: event.target.value } : item))}
+                    >
+                      <option value="">Group lead</option>
+                      {agents.filter((candidate) => candidate.id !== agent.id && candidate.team === agent.team && !candidate.managerId)
+                        .map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="agent-field">
                     <span>Role</span>
                     <textarea
                       value={agent.role}
                       maxLength={400}
                       rows={3}
+                      placeholder="Describe this agent's specialty and how it should approach work."
                       onChange={(event) => setAgents((current) => current.map((item) =>
                         item.id === agent.id ? { ...item, role: event.target.value } : item))}
                     />
                   </label>
-                </section>
+                  </div>
+                </details>
               ))}
             </div>
-            <button
-              className="action-button agent-add"
-              disabled={agents.length >= 8}
-              onClick={() => setAgents((current) => [...current, {
-                id: newId(),
-                name: `Agent ${current.length + 1}`,
-                role: 'Analyze the request from a distinct specialist perspective and report actionable findings.',
-                enabled: true,
-              }])}
-            >
-              Add teammate
-            </button>
 
             <section className="tasks-section">
               <div className="github-heading">
@@ -1235,10 +1571,17 @@ function App() {
               {scrapedPage && (
                 <article className="scraped-result">
                   <a href={scrapedPage.url} target="_blank" rel="noreferrer">{scrapedPage.title}</a>
+                  {scrapedPage.description && <p className="scraped-description">{scrapedPage.description}</p>}
+                  {(scrapedPage.author || scrapedPage.publishedAt) && (
+                    <small>{[scrapedPage.author, scrapedPage.publishedAt].filter(Boolean).join(' · ')}</small>
+                  )}
+                  {scrapedPage.headings.length > 0 && (
+                    <ul>{scrapedPage.headings.slice(0, 5).map((heading, index) => <li key={`${heading}-${index}`}>{heading}</li>)}</ul>
+                  )}
                   <p>{scrapedPage.content.slice(0, 420)}{scrapedPage.content.length > 420 ? '…' : ''}</p>
                   <button
                     className="agent-refresh"
-                    onClick={() => setPrompt(`Use this public source as reference for my team:\n${scrapedPage.title} (${scrapedPage.url})\n\n${scrapedPage.content.slice(0, 3000)}`)}
+                    onClick={() => setPrompt(`Use this public source as reference for my team:\n${scrapedPage.title} (${scrapedPage.canonicalUrl || scrapedPage.url})${scrapedPage.author ? `\nAuthor: ${scrapedPage.author}` : ''}${scrapedPage.publishedAt ? `\nPublished: ${scrapedPage.publishedAt}` : ''}${scrapedPage.description ? `\nSummary: ${scrapedPage.description}` : ''}\n\n${scrapedPage.content.slice(0, 3000)}`)}
                   >
                     Add research to chat
                   </button>
@@ -1281,8 +1624,62 @@ function App() {
                   </button>
                 </>
               )}
+              {githubAccount && (
+                <form className="github-create-form" onSubmit={(event) => void handleCreateGitHubRepository(event)}>
+                  <div className="github-heading"><h3>New repository</h3><span className="email-state">Private by default</span></div>
+                  <label className="agent-field">
+                    <span>Repository name</span>
+                    <input
+                      value={newRepositoryName}
+                      onChange={(event) => setNewRepositoryName(event.target.value)}
+                      placeholder="my-new-project"
+                      maxLength={100}
+                      required
+                    />
+                  </label>
+                  <label className="github-visibility">
+                    <input type="checkbox" checked={newRepositoryPrivate} onChange={(event) => setNewRepositoryPrivate(event.target.checked)} />
+                    <span>Private repository</span>
+                  </label>
+                  <button className="action-button github-create" type="submit" disabled={githubLoading || !newRepositoryName.trim()}>
+                    {githubLoading ? 'Working…' : 'Create repository'}
+                  </button>
+                </form>
+              )}
+              <section className="github-trust-section">
+                <div className="github-heading">
+                  <h3>Trusted authors</h3>
+                  {selectedGitHubOwner && (
+                    <button className="agent-refresh" type="button" disabled={selectedGitHubOwnerTrusted}
+                      onClick={() => handleTrustGitHubAuthor(selectedGitHubOwner)}>
+                      {selectedGitHubOwnerTrusted ? 'Trusted' : `Trust @${selectedGitHubOwner}`}
+                    </button>
+                  )}
+                </div>
+                <form className="github-trust-form" onSubmit={(event) => { event.preventDefault(); handleTrustGitHubAuthor(); }}>
+                  <input
+                    value={githubAuthorInput}
+                    onChange={(event) => setGithubAuthorInput(event.target.value)}
+                    placeholder="GitHub username"
+                    aria-label="GitHub author to trust"
+                    maxLength={39}
+                  />
+                  <button type="submit" disabled={!githubAuthorInput.trim()}>Add</button>
+                </form>
+                {githubTrustedAuthors.length > 0 ? (
+                  <ul className="trusted-author-list">
+                    {githubTrustedAuthors.map((author) => (
+                      <li key={author}>
+                        <a href={`https://github.com/${encodeURIComponent(author)}`} target="_blank" rel="noreferrer">@{author}</a>
+                        <button type="button" className="agent-remove" onClick={() => setGithubTrustedAuthors((current) => current.filter((item) => item !== author))} aria-label={`Remove ${author} from trusted authors`}>Remove</button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="empty-tasks">No authors marked trusted.</p>}
+                <p className="github-note">Trust labels are stored in this browser only. Review imported code before running or publishing it.</p>
+              </section>
               {githubError && <p className="github-message" role="status">{githubError}</p>}
-              <p className="github-note">Publishing updates selected repository files. Sign in locally with <code>gh auth login</code>.</p>
+              <p className="github-note">Sign in through the local GitHub CLI with <code>gh auth login</code>. AXOM does not receive your GitHub password or token.</p>
             </section>
 
             <section className="email-section">
@@ -1416,6 +1813,63 @@ function App() {
           )}
 
           <div className="assistant-column">
+            {activeView === 'team' ? (
+              <section className="team-channel-view">
+                <header className="team-channel-header">
+                  <div>
+                    <h1><span>#</span> {activeChatTeam}</h1>
+                    <p>{selectedTeamAgents.length} active agents · team discussion</p>
+                  </div>
+                  <button className="channel-details-button" onClick={() => setAgentsOpen(true)} aria-label="Open team details">
+                    {selectedTeamAgents.map((agent) => (
+                      <span className="channel-avatar" key={agent.id} title={agent.name}>{agent.name.slice(0, 1).toUpperCase()}</span>
+                    ))}
+                    <span>Details</span>
+                  </button>
+                </header>
+                <div className="team-channel-transcript" aria-live="polite">
+                  {(groupChats[activeChatTeam] || []).length === 0 ? (
+                    <div className="channel-empty-state">
+                      <span>#</span>
+                      <h2>Welcome to #{activeChatTeam}</h2>
+                      <p>This is the start of the team conversation. Send a message to bring the assigned agents in.</p>
+                    </div>
+                  ) : (groupChats[activeChatTeam] || []).map((message) => (
+                    <article className={`channel-message ${message.role}`} key={message.id}>
+                      <div className={`channel-avatar ${message.role === 'user' ? 'human' : 'agent'}`}>
+                        {message.sender.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="channel-message-body">
+                        <div className="channel-message-meta">
+                          <strong>{message.sender}</strong>
+                          <time>{message.role === 'assistant' ? 'team response' : 'now'}</time>
+                        </div>
+                        <p>{message.text}</p>
+                      </div>
+                    </article>
+                  ))}
+                  {groupChatBusy && (
+                    <article className="channel-message assistant">
+                      <div className="channel-avatar agent">A</div>
+                      <div className="channel-message-body"><strong>{activeChatTeam} agents</strong><p className="chat-thinking">Comparing notes…</p></div>
+                    </article>
+                  )}
+                  {groupChatError && <p className="channel-error" role="alert">{groupChatError}</p>}
+                </div>
+                <form className="team-channel-composer" onSubmit={(event) => { event.preventDefault(); void handleGroupChatSend(); }}>
+                  <input
+                    value={groupChatDraft}
+                    onChange={(event) => setGroupChatDraft(event.target.value)}
+                    placeholder={`Message #${activeChatTeam}`}
+                    maxLength={16000}
+                    aria-label={`Message ${activeChatTeam} group chat`}
+                    disabled={selectedTeamAgents.length === 0}
+                  />
+                  <button type="submit" disabled={!groupChatDraft.trim() || groupChatBusy || selectedTeamAgents.length === 0} aria-label="Send to team">↑</button>
+                </form>
+              </section>
+            ) : (
+              <>
             <div className={`chat-window ${messages.some((message) => message.role === 'user') ? 'has-messages' : 'welcome-chat'}`}>
               {messages.some((message) => message.role === 'user')
                 ? messages.filter((message) => message.id !== 1).map((msg) => (
@@ -1479,6 +1933,8 @@ function App() {
                 </button>
               </div>
             </div>
+              </>
+            )}
           </div>
         </section>
 
