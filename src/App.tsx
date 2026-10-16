@@ -21,17 +21,33 @@ type GeneratedFilePayload = {
   content: string;
 };
 
+type ManagedAgent = {
+  id: string;
+  name: string;
+  role: string;
+  enabled: boolean;
+};
+
+type GitHubRepository = {
+  nameWithOwner: string;
+  description: string | null;
+  isPrivate: boolean;
+};
+
+type ModelProfile = 'AXOM1.0' | 'AXOM1.1';
+
 type AgentPlanStep = {
   id: string;
   label: string;
   status: 'planned' | 'active' | 'done';
 };
 
-type ModelStatus = 'checking' | 'not-loaded' | 'loading' | 'loaded' | 'unavailable' | 'offline';
+type ModelStatus = 'checking' | 'not-loaded' | 'switching' | 'loading' | 'loaded' | 'unavailable' | 'offline';
 
 type ModelHealth = {
   status: Exclude<ModelStatus, 'checking' | 'offline'>;
   progress: number | null;
+  profile?: ModelProfile;
 };
 
 type RunnerResult = {
@@ -128,6 +144,35 @@ const quickPrompts = [
 ];
 
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const defaultAgents: ManagedAgent[] = [
+  { id: 'research', name: 'Scout', role: 'Research relevant APIs, documentation, constraints, and current best practices.', enabled: true },
+  { id: 'builder', name: 'Builder', role: 'Turn the request into a coherent implementation and identify the files or steps required.', enabled: true },
+  { id: 'reviewer', name: 'Reviewer', role: 'Review the proposed solution for bugs, security risks, missing requirements, and useful tests.', enabled: true },
+];
+
+function loadManagedAgents(): ManagedAgent[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem('axom-agents') || 'null');
+    if (!Array.isArray(stored)) return defaultAgents;
+    const agents = stored.flatMap((agent): ManagedAgent[] =>
+      agent &&
+      typeof agent.id === 'string' &&
+      typeof agent.name === 'string' &&
+      typeof agent.role === 'string'
+        ? [{
+          id: agent.id,
+          name: agent.name.slice(0, 48),
+          role: agent.role.slice(0, 400),
+          enabled: Boolean(agent.enabled),
+        }]
+        : [],
+    );
+    return agents.slice(0, 4);
+  } catch {
+    return defaultAgents;
+  }
+}
 
 function getLanguageFromPath(path: string): string {
   const extension = path.split('.').pop()?.toLowerCase() ?? '';
@@ -405,11 +450,24 @@ function App() {
   const [deepReasoning, setDeepReasoning] = useState(true);
   const [modelStatus, setModelStatus] = useState<ModelStatus>('checking');
   const [modelProgress, setModelProgress] = useState<number | null>(null);
+  const [modelProfile, setModelProfile] = useState<ModelProfile>('AXOM1.0');
+  const [agents, setAgents] = useState<ManagedAgent[]>(loadManagedAgents);
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  const [githubAccount, setGithubAccount] = useState<{ login: string; url: string } | null>(null);
+  const [githubRepositories, setGithubRepositories] = useState<GitHubRepository[]>([]);
+  const [githubRepository, setGithubRepository] = useState('');
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubError, setGithubError] = useState('');
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const activeAgents = agents.filter((agent) => agent.enabled);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    localStorage.setItem('axom-agents', JSON.stringify(agents));
+  }, [agents]);
 
   const startNewChat = () => {
     setMessages([{
@@ -425,14 +483,23 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    fetchModelHealth()
+    fetch('/api/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('The local model could not be started.');
+        return fetchModelHealth();
+      })
       .then((health) => {
         if (!active) return;
         setModelStatus(health.status);
         setModelProgress(health.progress);
+        if (health.profile) setModelProfile(health.profile);
       })
       .catch(() => {
-        if (active) setModelStatus('offline');
+        if (active) setModelStatus('unavailable');
       });
 
     return () => {
@@ -441,7 +508,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (modelStatus !== 'loading') return;
+    if (modelStatus !== 'loading' && modelStatus !== 'switching') return;
     let active = true;
     const interval = window.setInterval(() => {
       fetchModelHealth()
@@ -449,6 +516,7 @@ function App() {
           if (!active) return;
           setModelStatus(health.status);
           setModelProgress(health.progress);
+          if (health.profile) setModelProfile(health.profile);
         })
         .catch(() => {
           if (active) setModelStatus('offline');
@@ -465,6 +533,103 @@ function App() {
     () => files.find((file) => file.id === selectedFile) ?? files[0],
     [files, selectedFile],
   );
+
+  const refreshGitHub = async () => {
+    setGithubLoading(true);
+    setGithubError('');
+    try {
+      const statusResponse = await fetch('/api/github/status');
+      const status = await statusResponse.json() as {
+        connected?: boolean;
+        account?: { login?: string; url?: string };
+        error?: string;
+      };
+      if (!status.connected || !status.account?.login) {
+        setGithubAccount(null);
+        setGithubRepositories([]);
+        setGithubError(status.error || 'Sign in with `gh auth login` in the local terminal to connect GitHub.');
+        return;
+      }
+      setGithubAccount({ login: status.account.login, url: status.account.url || 'https://github.com' });
+      const repositoriesResponse = await fetch('/api/github/repos');
+      const repositoriesPayload = await repositoriesResponse.json() as {
+        repositories?: GitHubRepository[];
+        error?: string;
+      };
+      if (!repositoriesResponse.ok || !Array.isArray(repositoriesPayload.repositories)) {
+        throw new Error(repositoriesPayload.error || 'Could not load GitHub repositories.');
+      }
+      setGithubRepositories(repositoriesPayload.repositories);
+      setGithubRepository((current) => current || repositoriesPayload.repositories?.[0]?.nameWithOwner || '');
+    } catch (error) {
+      setGithubError(error instanceof Error ? error.message : 'Could not connect to GitHub.');
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
+  const handleModelProfileChange = async (profile: ModelProfile) => {
+    setModelProfile(profile);
+    setModelStatus('switching');
+    setRequestError('');
+    try {
+      const response = await fetch('/api/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || 'The model profile could not be changed.');
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : 'The model profile could not be changed.');
+      setModelStatus('unavailable');
+    }
+  };
+
+  const handleImportGitHubRepository = async () => {
+    if (!githubRepository || githubLoading) return;
+    setGithubLoading(true);
+    setGithubError('');
+    try {
+      const response = await fetch('/api/github/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repository: githubRepository }),
+      });
+      const payload = await response.json() as {
+        repository?: { fullName?: string; defaultBranch?: string };
+        files?: Array<{ path: string; content: string }>;
+        error?: string;
+      };
+      if (!response.ok || !Array.isArray(payload.files)) {
+        throw new Error(payload.error || 'Could not import this repository.');
+      }
+      const merged = new Map(files.map((file) => [file.name.toLowerCase(), file]));
+      const imported = payload.files.map((file) => ({
+        id: `github-${newId()}`,
+        name: file.path,
+        language: getLanguageFromPath(file.path),
+        value: file.content,
+      }));
+      imported.forEach((file) => merged.set(file.name.toLowerCase(), file));
+      const nextFiles = [...merged.values()];
+      if (nextFiles.reduce((total, file) => total + file.value.length, 0) > 24000) {
+        throw new Error('The imported repository would exceed the 24,000 character workspace context limit.');
+      }
+      setFiles(nextFiles);
+      if (imported.length > 0) setSelectedFile(imported[0].id);
+      setWorkspaceOpen(true);
+      setGithubError(`Imported ${imported.length} text files from ${payload.repository?.fullName || githubRepository}.`);
+    } catch (error) {
+      setGithubError(error instanceof Error ? error.message : 'Could not import this repository.');
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshGitHub();
+  }, []);
 
   const handleGenerate = async () => {
     const request = prompt.trim();
@@ -487,6 +652,7 @@ function App() {
           messages: conversation.map(({ role, text }) => ({ role, content: text })),
           files: files.map(({ name, value }) => ({ path: name, content: value })),
           deepReasoning,
+          agents: activeAgents.map(({ id, name, role }) => ({ id, name, role })),
         }),
       });
 
@@ -761,10 +927,23 @@ function App() {
           </div>
 
           <div className="status-row">
+            <label className="model-profile-control">
+              <span className="visually-hidden">Local model profile</span>
+              <select
+                value={modelProfile}
+                onChange={(event) => void handleModelProfileChange(event.target.value as ModelProfile)}
+                disabled={modelStatus === 'switching' || modelStatus === 'loading'}
+              >
+                <option value="AXOM1.0">AXOM 1.0 · 0.5B</option>
+                <option value="AXOM1.1">AXOM 1.1 · 1.5B</option>
+              </select>
+            </label>
             <span className={`status-pill ${modelStatus === 'loaded' ? 'online' : ''}`}>
-              {modelStatus === 'loading' && modelProgress !== null
+              {(modelStatus === 'loading' || modelStatus === 'switching') && modelProgress !== null
                 ? `Loading model ${modelProgress}%`
-                : modelStatus === 'not-loaded'
+                : modelStatus === 'loading' || modelStatus === 'switching'
+                  ? 'Loading model'
+                  : modelStatus === 'not-loaded'
                   ? 'Model not loaded'
                   : modelStatus === 'unavailable'
                     ? 'Model unavailable'
@@ -781,8 +960,119 @@ function App() {
             >
               {workspaceOpen ? 'Close workspace' : 'Workspace'}
             </button>
+            <button
+              className={`action-button workspace-toggle ${agentsOpen ? 'selected' : ''}`}
+              onClick={() => setAgentsOpen((open) => !open)}
+              aria-expanded={agentsOpen}
+              aria-controls="agent-manager"
+            >
+              Agents · {activeAgents.length}
+            </button>
           </div>
         </header>
+
+        {agentsOpen && (
+          <aside className="agent-drawer" id="agent-manager" aria-label="Agent team and GitHub">
+            <div className="agent-drawer-header">
+              <div>
+                <h2>Agent team</h2>
+                <p>Runs sequentially on the selected local model.</p>
+              </div>
+              <button className="workspace-close" onClick={() => setAgentsOpen(false)} aria-label="Close agent manager">×</button>
+            </div>
+            <div className="agent-list">
+              {agents.map((agent) => (
+                <section className="agent-item" key={agent.id}>
+                  <div className="agent-item-topline">
+                    <label className="agent-enabled">
+                      <input
+                        type="checkbox"
+                        checked={agent.enabled}
+                        onChange={(event) => setAgents((current) => current.map((item) =>
+                          item.id === agent.id ? { ...item, enabled: event.target.checked } : item))}
+                      />
+                      <span>Assigned</span>
+                    </label>
+                    <button
+                      className="agent-remove"
+                      onClick={() => setAgents((current) => current.filter((item) => item.id !== agent.id))}
+                      aria-label={`Remove ${agent.name}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <label className="agent-field">
+                    <span>Name</span>
+                    <input
+                      value={agent.name}
+                      maxLength={48}
+                      onChange={(event) => setAgents((current) => current.map((item) =>
+                        item.id === agent.id ? { ...item, name: event.target.value } : item))}
+                    />
+                  </label>
+                  <label className="agent-field">
+                    <span>Role</span>
+                    <textarea
+                      value={agent.role}
+                      maxLength={400}
+                      rows={3}
+                      onChange={(event) => setAgents((current) => current.map((item) =>
+                        item.id === agent.id ? { ...item, role: event.target.value } : item))}
+                    />
+                  </label>
+                </section>
+              ))}
+            </div>
+            <button
+              className="action-button agent-add"
+              disabled={agents.length >= 4}
+              onClick={() => setAgents((current) => [...current, {
+                id: newId(),
+                name: `Agent ${current.length + 1}`,
+                role: 'Analyze the request from a distinct specialist perspective and report actionable findings.',
+                enabled: true,
+              }])}
+            >
+              Add agent
+            </button>
+
+            <section className="github-section">
+              <div className="github-heading">
+                <h3>GitHub</h3>
+                <button className="agent-refresh" onClick={() => void refreshGitHub()} disabled={githubLoading}>
+                  {githubLoading ? 'Working…' : 'Refresh'}
+                </button>
+              </div>
+              {githubAccount ? (
+                <a className="github-account" href={githubAccount.url} target="_blank" rel="noreferrer">
+                  <span className="github-dot connected" />
+                  @{githubAccount.login}
+                </a>
+              ) : (
+                <p className="github-account"><span className="github-dot" />Not connected</p>
+              )}
+              {githubRepositories.length > 0 && (
+                <>
+                  <label className="agent-field">
+                    <span>Repository</span>
+                    <select value={githubRepository} onChange={(event) => setGithubRepository(event.target.value)}>
+                      {githubRepositories.map((repository) => (
+                        <option key={repository.nameWithOwner} value={repository.nameWithOwner}>
+                          {repository.nameWithOwner}{repository.isPrivate ? ' · private' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="action-button github-import" onClick={() => void handleImportGitHubRepository()} disabled={githubLoading || !githubRepository}>
+                    Import repository files
+                  </button>
+                </>
+              )}
+              {githubError && <p className="github-message" role="status">{githubError}</p>}
+              <p className="github-note">Read-only import. Sign in locally with <code>gh auth login</code>.</p>
+            </section>
+          </aside>
+        )}
 
         {requestError && (
           <div className="request-error" role="alert">
@@ -918,7 +1208,11 @@ function App() {
                 )}
               {isLoading && (
                 <div className="message assistant">
-                  <p className="chat-thinking">AXON is working…</p>
+                  <p className="chat-thinking">
+                    {activeAgents.length > 0
+                      ? `Running ${activeAgents.length} specialist ${activeAgents.length === 1 ? 'pass' : 'passes'}…`
+                      : 'AXON is working…'}
+                  </p>
                 </div>
               )}
               <div ref={transcriptEndRef} />
