@@ -2622,6 +2622,279 @@ textarea:focus-visible {
   }
 }
 
+:root {
+  --canvas: #111713;
+  --sidebar: #0d1410;
+  --surface: #1a231d;
+  --surface-hover: #253128;
+  --line: rgba(198, 220, 195, 0.12);
+  --muted: #9ba99c;
+  --text: #edf3e9;
+  --accent: #b7dd8a;
+  color: var(--text);
+  color-scheme: dark;
+  font-family: 'Avenir Next', 'Segoe UI', sans-serif;
+  background: var(--canvas);
+}
+
+.app-shell,
+.main-panel,
+.workspace-panel {
+  background-color: var(--canvas);
+}
+
+.sidebar {
+  background: linear-gradient(180deg, #142019 0%, #101812 100%);
+  border-right-color: rgba(197, 218, 191, 0.1);
+}
+
+.brand-mark,
+.welcome-mark,
+.assistant-avatar {
+  background: #bddb8c;
+  color: #1c2b1b;
+}
+
+.topbar {
+  border-bottom: 1px solid rgba(197, 218, 191, 0.12);
+  background: rgba(17, 23, 19, 0.97);
+}
+
+.status-pill.online,
+.sidebar-status-dot.ready,
+.agent-enabled input {
+  color: #c6e69e;
+  accent-color: #bddb8c;
+}
+
+.agent-drawer {
+  border-color: rgba(197, 218, 191, 0.16);
+  border-radius: 8px;
+  background: #151e18;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+}
+
+.agent-item,
+.task-item {
+  border-color: rgba(197, 218, 191, 0.12);
+  border-radius: 6px;
+  background: #1a241d;
+}
+
+.agent-field input,
+.agent-field textarea,
+.agent-field select,
+.model-profile-control select,
+.task-create input,
+.task-controls select,
+.web-scrape-form input {
+  border-color: rgba(197, 218, 191, 0.16);
+  border-radius: 5px;
+  background: #101712;
+  color: #edf3e9;
+}
+
+.action-button,
+.task-run,
+.web-scrape-form button {
+  border-radius: 5px;
+}
+
+.action-button.agent-add,
+.task-run,
+.web-scrape-form button {
+  border: 1px solid rgba(183, 221, 138, 0.42);
+  background: rgba(183, 221, 138, 0.1);
+  color: #d4efb4;
+}
+
+.action-button.agent-add:hover,
+.task-run:hover,
+.web-scrape-form button:hover {
+  background: rgba(183, 221, 138, 0.2);
+}
+
+.tasks-section,
+.web-section,
+.github-section,
+.email-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 17px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(197, 218, 191, 0.12);
+}
+
+.task-count,
+.email-state {
+  color: #a8bd94;
+  font-size: 10px;
+}
+
+.task-create,
+.web-scrape-form {
+  display: flex;
+  gap: 6px;
+}
+
+.task-create input,
+.web-scrape-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.task-create button {
+  flex: 0 0 34px;
+  border: 1px solid rgba(183, 221, 138, 0.42);
+  border-radius: 5px;
+  background: rgba(183, 221, 138, 0.13);
+  color: #d4efb4;
+  font-size: 19px;
+}
+
+.task-create button:disabled,
+.task-run:disabled,
+.web-scrape-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.task-list {
+  display: grid;
+  gap: 7px;
+  max-height: 290px;
+  overflow-y: auto;
+}
+
+.task-item {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+}
+
+.task-item-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.task-item-heading p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: #e3eade;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.task-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #d9a66d;
+}
+
+.task-item.in-progress .task-status-dot {
+  background: #83c6ad;
+}
+
+.task-item.done .task-status-dot {
+  background: #77917c;
+}
+
+.task-item.done .task-item-heading p {
+  color: #93a093;
+}
+
+.task-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.task-controls select {
+  min-width: 0;
+  height: 27px;
+  flex: 1 1 0;
+  padding: 3px 5px;
+  font: inherit;
+  font-size: 9px;
+}
+
+.task-run {
+  min-height: 27px;
+  padding: 4px 8px;
+  font-size: 9px;
+}
+
+.empty-tasks {
+  margin: 0;
+  color: #89978b;
+  font-size: 10px;
+}
+
+.web-scrape-form button {
+  flex: 0 0 auto;
+  padding: 0 9px;
+  font-size: 10px;
+}
+
+.scraped-result {
+  padding: 10px;
+  border-left: 2px solid #c39461;
+  background: rgba(214, 181, 134, 0.06);
+}
+
+.scraped-result > a {
+  color: #e2c49e;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.scraped-result p {
+  max-height: 82px;
+  overflow: auto;
+  margin: 7px 0;
+  color: #b8c2b8;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.github-publish {
+  border-color: rgba(196, 148, 97, 0.35);
+  color: #e2c49e;
+}
+
+.email-compose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  text-decoration: none;
+}
+
+.github-note,
+.github-message {
+  color: #93a093;
+}
+
+@media (max-width: 680px) {
+  .agent-drawer {
+    background: #151e18;
+  }
+
+  .task-list {
+    max-height: 220px;
+  }
+}
+
 .app-shell {
   grid-template-columns: 260px minmax(0, 1fr);
   background: #212121;

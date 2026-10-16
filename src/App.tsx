@@ -28,6 +28,13 @@ type ManagedAgent = {
   enabled: boolean;
 };
 
+type ManagedTask = {
+  id: string;
+  title: string;
+  assigneeId: string;
+  status: 'queued' | 'in-progress' | 'done';
+};
+
 type GitHubRepository = {
   nameWithOwner: string;
   description: string | null;
@@ -145,6 +152,22 @@ const quickPrompts = [
 
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+function loadManagedTasks(): ManagedTask[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem('axom-tasks') || '[]');
+    if (!Array.isArray(stored)) return [];
+    return stored.flatMap((task): ManagedTask[] =>
+      task && typeof task.id === 'string' && typeof task.title === 'string' &&
+      typeof task.assigneeId === 'string' &&
+      (task.status === 'queued' || task.status === 'in-progress' || task.status === 'done')
+        ? [{ id: task.id, title: task.title.slice(0, 180), assigneeId: task.assigneeId, status: task.status }]
+        : [],
+    ).slice(0, 100);
+  } catch {
+    return [];
+  }
+}
+
 const defaultAgents: ManagedAgent[] = [
   { id: 'research', name: 'Scout', role: 'Research relevant APIs, documentation, constraints, and current best practices.', enabled: true },
   { id: 'builder', name: 'Builder', role: 'Turn the request into a coherent implementation and identify the files or steps required.', enabled: true },
@@ -168,7 +191,7 @@ function loadManagedAgents(): ManagedAgent[] {
         }]
         : [],
     );
-    return agents.slice(0, 4);
+    return agents.slice(0, 8);
   } catch {
     return defaultAgents;
   }
@@ -452,7 +475,14 @@ function App() {
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const [modelProfile, setModelProfile] = useState<ModelProfile>('AXOM1.0');
   const [agents, setAgents] = useState<ManagedAgent[]>(loadManagedAgents);
+  const [tasks, setTasks] = useState<ManagedTask[]>(loadManagedTasks);
+  const [taskTitle, setTaskTitle] = useState('');
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [emailAddress, setEmailAddress] = useState(() => localStorage.getItem('axom-email') || '');
+  const [webUrl, setWebUrl] = useState('');
+  const [webLoading, setWebLoading] = useState(false);
+  const [webError, setWebError] = useState('');
+  const [scrapedPage, setScrapedPage] = useState<{ title: string; url: string; content: string } | null>(null);
   const [githubAccount, setGithubAccount] = useState<{ login: string; url: string } | null>(null);
   const [githubRepositories, setGithubRepositories] = useState<GitHubRepository[]>([]);
   const [githubRepository, setGithubRepository] = useState('');
@@ -468,6 +498,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem('axom-agents', JSON.stringify(agents));
   }, [agents]);
+
+  useEffect(() => {
+    localStorage.setItem('axom-tasks', JSON.stringify(tasks));
+  }, [tasks]);
+
+  useEffect(() => {
+    localStorage.setItem('axom-email', emailAddress);
+  }, [emailAddress]);
 
   const startNewChat = () => {
     setMessages([{
@@ -627,13 +665,75 @@ function App() {
     }
   };
 
+  const handlePublishGitHubRepository = async () => {
+    if (!githubRepository || githubLoading) return;
+    setGithubLoading(true);
+    setGithubError('');
+    try {
+      const response = await fetch('/api/github/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repository: githubRepository,
+          files: files.map(({ name, value }) => ({ path: name, content: value })),
+        }),
+      });
+      const payload = await response.json() as { publishedCount?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error || 'Could not publish this workspace.');
+      setGithubError(`Published ${payload.publishedCount || 0} files to ${githubRepository}.`);
+    } catch (error) {
+      setGithubError(error instanceof Error ? error.message : 'Could not publish this workspace.');
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
+  const handleScrapeWebPage = async () => {
+    if (!webUrl.trim() || webLoading) return;
+    setWebLoading(true);
+    setWebError('');
+    setScrapedPage(null);
+    try {
+      const response = await fetch('/api/web/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: webUrl.trim() }),
+      });
+      const payload = await response.json() as { title?: string; url?: string; content?: string; error?: string };
+      if (!response.ok || !payload.url || !payload.content) {
+        throw new Error(payload.error || 'Could not read this web page.');
+      }
+      setScrapedPage({ title: payload.title || payload.url, url: payload.url, content: payload.content });
+    } catch (error) {
+      setWebError(error instanceof Error ? error.message : 'Could not read this web page.');
+    } finally {
+      setWebLoading(false);
+    }
+  };
+
+  const addTask = () => {
+    const title = taskTitle.trim();
+    if (!title) return;
+    const task: ManagedTask = {
+      id: newId(),
+      title: title.slice(0, 180),
+      assigneeId: agents[0]?.id || '',
+      status: 'queued',
+    };
+    setTasks((current) => [task, ...current].slice(0, 100));
+    setTaskTitle('');
+  };
+
   useEffect(() => {
     void refreshGitHub();
   }, []);
 
-  const handleGenerate = async () => {
-    const request = prompt.trim();
-    if (!request || isLoading) return;
+  const handleGenerate = async (requestOverride?: string, selectedAgentId?: string): Promise<boolean> => {
+    const request = (requestOverride ?? prompt).trim();
+    if (!request || isLoading) return false;
+    const requestAgents = selectedAgentId
+      ? agents.filter((agent) => agent.id === selectedAgentId)
+      : activeAgents;
     const requestText = request;
     const conversation = [
       ...messages.filter((message) => message.role !== 'assistant' || message.id !== 1),
@@ -652,7 +752,7 @@ function App() {
           messages: conversation.map(({ role, text }) => ({ role, content: text })),
           files: files.map(({ name, value }) => ({ path: name, content: value })),
           deepReasoning,
-          agents: activeAgents.map(({ id, name, role }) => ({ id, name, role })),
+          agents: requestAgents.map(({ id, name, role }) => ({ id, name, role })),
         }),
       });
 
@@ -704,6 +804,7 @@ function App() {
       setPrompt('');
       setModelStatus('loaded');
       setModelProgress(100);
+      return true;
     } catch (error) {
       const message = error instanceof TypeError
         ? 'Could not connect to AXOM’s local model backend. Start the backend with `npm run dev:server`, then try again.'
@@ -712,6 +813,7 @@ function App() {
           : 'AXOM could not run the local model.';
       setRequestError(message);
       setModelStatus(error instanceof TypeError ? 'offline' : 'unavailable');
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -873,7 +975,7 @@ function App() {
         <div className="brand-row">
           <div className="brand-mark">A</div>
           <div>
-            <p className="muted">Workspace</p>
+            <p className="muted">Team operations</p>
             <h2>AXON</h2>
           </div>
         </div>
@@ -884,10 +986,10 @@ function App() {
         </button>
 
         <div className="sidebar-panel conversation-sidebar">
-          <div className="panel-label">Chats</div>
+          <div className="panel-label">Work desk</div>
           <button className="nav-item active current-chat" onClick={startNewChat}>
             <span aria-hidden="true">◌</span>
-            <span>Current conversation</span>
+            <span>Team inbox</span>
           </button>
         </div>
 
@@ -923,7 +1025,7 @@ function App() {
           <div className="chat-title">
             <button className="mobile-new-chat" onClick={startNewChat} aria-label="Start a new chat">＋</button>
             <strong>AXON</strong>
-            <span className="model-title">Local coding assistant</span>
+            <span className="model-title">Operations desk</span>
           </div>
 
           <div className="status-row">
@@ -975,8 +1077,8 @@ function App() {
           <aside className="agent-drawer" id="agent-manager" aria-label="Agent team and GitHub">
             <div className="agent-drawer-header">
               <div>
-                <h2>Agent team</h2>
-                <p>Runs sequentially on the selected local model.</p>
+                <h2>Team &amp; work</h2>
+                <p>{activeAgents.length} active specialists · {tasks.filter((task) => task.status !== 'done').length} open tasks</p>
               </div>
               <button className="workspace-close" onClick={() => setAgentsOpen(false)} aria-label="Close agent manager">×</button>
             </div>
@@ -1025,7 +1127,7 @@ function App() {
             </div>
             <button
               className="action-button agent-add"
-              disabled={agents.length >= 4}
+              disabled={agents.length >= 8}
               onClick={() => setAgents((current) => [...current, {
                 id: newId(),
                 name: `Agent ${current.length + 1}`,
@@ -1033,8 +1135,116 @@ function App() {
                 enabled: true,
               }])}
             >
-              Add agent
+              Add teammate
             </button>
+
+            <section className="tasks-section">
+              <div className="github-heading">
+                <h3>Work queue</h3>
+                <span className="task-count">{tasks.length}</span>
+              </div>
+              <form className="task-create" onSubmit={(event) => { event.preventDefault(); addTask(); }}>
+                <input
+                  aria-label="New task"
+                  value={taskTitle}
+                  onChange={(event) => setTaskTitle(event.target.value)}
+                  placeholder="Add a task for the team"
+                  maxLength={180}
+                />
+                <button type="submit" disabled={!taskTitle.trim()} aria-label="Add task">+</button>
+              </form>
+              {tasks.length === 0 ? (
+                <p className="empty-tasks">No work assigned yet.</p>
+              ) : (
+                <div className="task-list">
+                  {tasks.map((task) => {
+                    const assignedAgent = agents.find((agent) => agent.id === task.assigneeId);
+                    return (
+                      <article className={`task-item ${task.status}`} key={task.id}>
+                        <div className="task-item-heading">
+                          <span className="task-status-dot" />
+                          <p>{task.title}</p>
+                          <button
+                            className="agent-remove"
+                            onClick={() => setTasks((current) => current.filter((item) => item.id !== task.id))}
+                            aria-label={`Remove task ${task.title}`}
+                          >×</button>
+                        </div>
+                        <div className="task-controls">
+                          <label className="visually-hidden" htmlFor={`assignee-${task.id}`}>Assigned teammate</label>
+                          <select
+                            id={`assignee-${task.id}`}
+                            value={task.assigneeId}
+                            onChange={(event) => setTasks((current) => current.map((item) =>
+                              item.id === task.id ? { ...item, assigneeId: event.target.value } : item))}
+                          >
+                            <option value="">Unassigned</option>
+                            {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+                          </select>
+                          <select
+                            aria-label={`Status for ${task.title}`}
+                            value={task.status}
+                            onChange={(event) => setTasks((current) => current.map((item) =>
+                              item.id === task.id ? { ...item, status: event.target.value as ManagedTask['status'] } : item))}
+                          >
+                            <option value="queued">Queued</option>
+                            <option value="in-progress">In progress</option>
+                            <option value="done">Done</option>
+                          </select>
+                          {task.status !== 'done' && task.assigneeId && (
+                            <button
+                              className="task-run"
+                              disabled={isLoading}
+                              onClick={async () => {
+                                setTasks((current) => current.map((item) =>
+                                  item.id === task.id ? { ...item, status: 'in-progress' } : item));
+                                const agent = agents.find((item) => item.id === task.assigneeId);
+                                const completed = await handleGenerate(
+                                  `Work item for ${agent?.name || 'the team'} (${agent?.role || 'general support'}): ${task.title}`,
+                                  task.assigneeId,
+                                );
+                                if (completed) setTasks((current) => current.map((item) =>
+                                  item.id === task.id ? { ...item, status: 'done' } : item));
+                              }}
+                            >
+                              Run
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="web-section">
+              <div className="github-heading"><h3>Web research</h3></div>
+              <form className="web-scrape-form" onSubmit={(event) => { event.preventDefault(); void handleScrapeWebPage(); }}>
+                <input
+                  type="url"
+                  aria-label="Public web page URL"
+                  value={webUrl}
+                  onChange={(event) => setWebUrl(event.target.value)}
+                  placeholder="https://example.com/article"
+                  required
+                />
+                <button type="submit" disabled={webLoading}>{webLoading ? 'Reading…' : 'Read page'}</button>
+              </form>
+              {webError && <p className="github-message" role="alert">{webError}</p>}
+              {scrapedPage && (
+                <article className="scraped-result">
+                  <a href={scrapedPage.url} target="_blank" rel="noreferrer">{scrapedPage.title}</a>
+                  <p>{scrapedPage.content.slice(0, 420)}{scrapedPage.content.length > 420 ? '…' : ''}</p>
+                  <button
+                    className="agent-refresh"
+                    onClick={() => setPrompt(`Use this public source as reference for my team:\n${scrapedPage.title} (${scrapedPage.url})\n\n${scrapedPage.content.slice(0, 3000)}`)}
+                  >
+                    Add research to chat
+                  </button>
+                </article>
+              )}
+            </section>
 
             <section className="github-section">
               <div className="github-heading">
@@ -1066,10 +1276,32 @@ function App() {
                   <button className="action-button github-import" onClick={() => void handleImportGitHubRepository()} disabled={githubLoading || !githubRepository}>
                     Import repository files
                   </button>
+                  <button className="action-button github-publish" onClick={() => void handlePublishGitHubRepository()} disabled={githubLoading || !githubRepository || files.length === 0}>
+                    Publish workspace to repository
+                  </button>
                 </>
               )}
               {githubError && <p className="github-message" role="status">{githubError}</p>}
-              <p className="github-note">Read-only import. Sign in locally with <code>gh auth login</code>.</p>
+              <p className="github-note">Publishing updates selected repository files. Sign in locally with <code>gh auth login</code>.</p>
+            </section>
+
+            <section className="email-section">
+              <div className="github-heading"><h3>Email</h3><span className="email-state">Local</span></div>
+              <label className="agent-field">
+                <span>Team contact address</span>
+                <input
+                  type="email"
+                  value={emailAddress}
+                  onChange={(event) => setEmailAddress(event.target.value)}
+                  placeholder="team@company.com"
+                />
+              </label>
+              {emailAddress && (
+                <a className="action-button email-compose" href={`mailto:${emailAddress}?subject=${encodeURIComponent('AXON team update')}`}>
+                  Compose email to team
+                </a>
+              )}
+              <p className="github-note">Opens your email app with a draft. No mailbox access or email is sent by AXON.</p>
             </section>
           </aside>
         )}
@@ -1195,8 +1427,8 @@ function App() {
                 : (
                   <div className="chat-welcome">
                     <div className="welcome-mark">A</div>
-                    <h1>What can I help you build?</h1>
-                    <p>Ask a question, describe a bug, or start a project.</p>
+                    <h1>What needs attention today?</h1>
+                    <p>Coordinate work, research, and project delivery with your agent team.</p>
                     <div className="welcome-prompts">
                       {quickPrompts.map((example) => (
                         <button key={example} className="prompt-chip" onClick={() => setPrompt(example)}>
@@ -1239,7 +1471,7 @@ function App() {
                 <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
                 <button
                   className="send-button"
-                  onClick={handleGenerate}
+                  onClick={() => void handleGenerate()}
                   disabled={isLoading || !prompt.trim()}
                   aria-label={isLoading ? 'AXON is thinking' : 'Send message'}
                 >

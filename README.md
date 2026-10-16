@@ -33,6 +33,10 @@ The default cache directory is `.cache/huggingface`. Set `AXOM_MODEL_CACHE_DIR` 
 
 AXOM can retrieve public web search snippets and GitHub README excerpts for relevant requests and save references with their source links to `.cache/axom-knowledge.json` (override with `AXOM_KNOWLEDGE_FILE`). Locally saved coding examples and public references are retrieval memory, not model-weight training: AXOM's parameters do not change. Saved references are bounded to keep local storage manageable. Do not treat retrieved snippets as verified or current without checking their sources.
 
+The team drawer lets you define up to eight specialist agents, assign locally saved work items, and run a task through its assigned agent. Public web pages can be read by URL; requests are limited to public HTTP(S) hosts and page size/time limits. GitHub access uses the local `gh` CLI session. Import reads a repository; publishing writes workspace files to the selected repository's default branch, one GitHub commit per file. Review the selected repository and workspace before publishing; environment files and common private-key files are blocked. Email is a locally saved contact address that opens a prefilled draft in your configured mail app; AXOM does not read mailboxes or send messages.
+
+When running alongside another local AXOM backend, set `AXOM_API_URL` to configure the Vite `/api` proxy target (for example, `AXOM_API_URL=http://127.0.0.1:3002`).
+
 AXOM's optional local profile and example data are stored under `.cache/` by the backend. This is retrieval context, not model-weight training. Never put secrets or sensitive personal data in the profile or workspace.
 
 The API binds to `127.0.0.1` by default and accepts browser API requests only from the local Vite origins `http://localhost:5173` and `http://127.0.0.1:5173`. To use another trusted development origin, set `AXOM_ALLOWED_ORIGINS` to a comma-separated exact origin allowlist; when set, it replaces the defaults. Set `AXOM_HOST` only when you deliberately need a non-loopback bind. The origin allowlist is not authentication—do not expose the API to an untrusted network.

@@ -32,7 +32,7 @@ const PROFILE_FILE = path.resolve(
 );
 const MAX_LEARNED_EXAMPLES = 100;
 const MAX_PROFILE_ITEMS = 25;
-const MAX_AGENT_TEAM = 4;
+const MAX_AGENT_TEAM = 8;
 const MAX_AGENT_REPORT_CHARS = 1200;
 const MAX_SAVED_KNOWLEDGE_ENTRIES = 1000;
 const MAX_HISTORY_MESSAGES = 20;
@@ -1656,6 +1656,27 @@ export function createAxomApiMiddleware() {
       });
     }
 
+    if (apiPath === '/web/scrape' && req.method === 'POST') {
+      return jsonParser(req, res, async (parseError) => {
+        if (parseError) return sendJson(res, 400, { error: 'Invalid JSON payload.' });
+        const value = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+        if (!value || value.length > 2048) {
+          return sendJson(res, 400, { error: 'Enter a valid public web page URL.' });
+        }
+        try {
+          const url = new URL(value);
+          const page = await scrapePublicWebPage(url.toString());
+          return sendJson(res, 200, {
+            title: page.title || url.hostname,
+            url: url.toString(),
+            content: page.content,
+          });
+        } catch (error) {
+          return sendJson(res, 400, { error: getErrorMessage(error) });
+        }
+      });
+    }
+
     if (apiPath === '/github/status' && req.method === 'GET') {
       return runGitHubCli(['api', 'user', '--jq', '{login: .login, url: .html_url}'])
         .then((output) => sendJson(res, 200, { connected: true, account: JSON.parse(output) }))
@@ -1686,6 +1707,70 @@ export function createAxomApiMiddleware() {
           return sendJson(res, 200, result);
         } catch (error) {
           return sendJson(res, 503, { error: getErrorMessage(error) });
+        }
+      });
+    }
+
+    if (apiPath === '/github/publish' && req.method === 'POST') {
+      return jsonParser(req, res, async (parseError) => {
+        if (parseError) return sendJson(res, 400, { error: 'Invalid JSON payload.' });
+        const fullName = typeof req.body?.repository === 'string' ? req.body.repository : '';
+        if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) {
+          return sendJson(res, 400, { error: 'Choose a valid GitHub repository.' });
+        }
+        let files;
+        try {
+          files = normalizeProjectFiles(req.body?.files);
+        } catch (error) {
+          return sendJson(res, 400, { error: getErrorMessage(error) });
+        }
+        if (files.length === 0 || files.length > 64) {
+          return sendJson(res, 400, { error: 'Publish between 1 and 64 workspace files.' });
+        }
+        if (files.some(({ path: filePath }) => {
+          const basename = path.posix.basename(filePath).toLowerCase();
+          return (/^\.env(?:\.|$)/.test(basename) && basename !== '.env.example') ||
+            /^(?:id_rsa|id_ed25519|credentials\.json|secrets\.json|.*\.(?:pem|key|p12|pfx))$/.test(basename);
+        })) {
+          return sendJson(res, 400, { error: 'Remove private keys and environment files before publishing this workspace.' });
+        }
+        let publishedCount = 0;
+        try {
+          const repository = JSON.parse(await runGitHubCli(['api', `repos/${fullName}`]));
+          const branch = repository.default_branch;
+          if (typeof branch !== 'string' || !branch) {
+            throw new Error('GitHub did not return a default branch for this repository.');
+          }
+          const tree = JSON.parse(await runGitHubCli([
+            'api', `repos/${fullName}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+          ]));
+          if (!Array.isArray(tree.tree)) throw new Error('GitHub returned an invalid repository file tree.');
+          if (tree.truncated) throw new Error('This repository is too large to safely locate existing workspace files.');
+          const existingFiles = new Map(
+            tree.tree
+              .filter((entry) => entry?.type === 'blob' && typeof entry.path === 'string' && typeof entry.sha === 'string')
+              .map((entry) => [entry.path, entry.sha]),
+          );
+          for (const file of files) {
+            const encodedPath = file.path.split('/').map(encodeURIComponent).join('/');
+            const args = [
+              'api', '--method', 'PUT', `repos/${fullName}/contents/${encodedPath}`,
+              '--field', `message=AXOM publish ${file.path}`,
+              '--field', `content=${Buffer.from(file.content, 'utf8').toString('base64')}`,
+              '--field', `branch=${branch}`,
+            ];
+            const existingSha = existingFiles.get(file.path);
+            if (existingSha) args.push('--field', `sha=${existingSha}`);
+            await runGitHubCli(args);
+            publishedCount += 1;
+          }
+          return sendJson(res, 200, { ok: true, publishedCount, repository: fullName, branch });
+        } catch (error) {
+          return sendJson(res, 503, {
+            error: publishedCount > 0
+              ? `Published ${publishedCount} files before the publish failed: ${getErrorMessage(error)}`
+              : getErrorMessage(error),
+          });
         }
       });
     }
