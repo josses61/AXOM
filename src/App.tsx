@@ -1,5 +1,5 @@
 import { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { strToU8, zipSync } from 'fflate';
+import { strToU8, Unzip, UnzipInflate, UnzipPassThrough, zipSync } from 'fflate';
 
 type ChatMessage = {
   id: number;
@@ -14,6 +14,17 @@ type FileItem = {
   name: string;
   language: string;
   value: string;
+};
+
+type WorkspaceAsset = {
+  id: string;
+  name: string;
+  data: Uint8Array;
+};
+
+type ArchiveEntry = {
+  path: string;
+  data: Uint8Array;
 };
 
 type GeneratedFilePayload = {
@@ -107,6 +118,93 @@ function isSafeWorkspacePath(path: string): boolean {
     !path.includes('\\') &&
     !/^[a-zA-Z]:/.test(path) &&
     path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+}
+
+const MAX_WORKSPACE_FILES = 64;
+const MAX_ARCHIVE_INPUT_BYTES = 20 * 1024 * 1024;
+const MAX_ARCHIVE_OUTPUT_BYTES = 32 * 1024 * 1024;
+const MAX_ASSET_BYTES = 16 * 1024 * 1024;
+const MAX_SOURCE_FILE_CHARS = 12000;
+const MAX_SOURCE_CONTEXT_CHARS = 24000;
+
+function extractZipEntries(data: Uint8Array, maxOutputBytes = MAX_ARCHIVE_OUTPUT_BYTES): Promise<ArchiveEntry[]> {
+  return new Promise((resolve, reject) => {
+    const entries: ArchiveEntry[] = [];
+    let totalBytes = 0;
+    let fileCount = 0;
+    let pendingFiles = 0;
+    let streamEnded = false;
+    let failure: Error | null = null;
+    const fail = (message: string) => {
+      if (failure) return;
+      failure = new Error(message);
+      reject(failure);
+    };
+    const finishIfReady = () => {
+      if (streamEnded && pendingFiles === 0 && !failure) {
+        if (entries.length === 0) fail('The ZIP archive contains no files.');
+        else resolve(entries);
+      }
+    };
+    const archive = new Unzip((file) => {
+      if (failure || file.name.endsWith('/')) return;
+      if (!isSafeWorkspacePath(file.name)) {
+        fail(`The archive contains an unsafe file path: ${file.name}`);
+        return;
+      }
+      fileCount += 1;
+      if (fileCount > MAX_WORKSPACE_FILES) {
+        fail(`ZIP archives can contain up to ${MAX_WORKSPACE_FILES} files.`);
+        return;
+      }
+      if ((file.originalSize || 0) > maxOutputBytes - totalBytes) {
+        fail('The expanded ZIP archive exceeds the 32 MB import limit.');
+        return;
+      }
+
+      pendingFiles += 1;
+      let fileBytes = 0;
+      const chunks: Uint8Array[] = [];
+      file.ondata = (error, chunk, final) => {
+        if (failure) return;
+        if (error) {
+          fail(`Could not read ${file.name} from the ZIP archive.`);
+          return;
+        }
+        fileBytes += chunk.byteLength;
+        totalBytes += chunk.byteLength;
+        if (totalBytes > maxOutputBytes) {
+          fail('The expanded ZIP archive exceeds the 32 MB import limit.');
+          return;
+        }
+        chunks.push(chunk);
+        if (!final) return;
+        const content = new Uint8Array(fileBytes);
+        let offset = 0;
+        chunks.forEach((part) => {
+          content.set(part, offset);
+          offset += part.byteLength;
+        });
+        entries.push({ path: file.name, data: content });
+        pendingFiles -= 1;
+        finishIfReady();
+      };
+      try {
+        file.start();
+      } catch {
+        fail(`The ZIP archive uses an unsupported compression method for ${file.name}.`);
+      }
+    });
+    archive.register(UnzipPassThrough);
+    archive.register(UnzipInflate);
+    try {
+      archive.push(data, true);
+      streamEnded = true;
+      finishIfReady();
+    } catch {
+      fail('The selected ZIP archive is invalid or damaged.');
+    }
+  });
 }
 
 const starterFiles: FileItem[] = [
@@ -510,6 +608,7 @@ function App() {
     },
   ]);
   const [files, setFiles] = useState<FileItem[]>(starterFiles);
+  const [assets, setAssets] = useState<WorkspaceAsset[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>('app');
   const [newFileExtension, setNewFileExtension] = useState<(typeof newFileTypes)[number][0]>('tsx');
   const [isLoading, setIsLoading] = useState(false);
@@ -523,7 +622,7 @@ function App() {
   const [deepReasoning, setDeepReasoning] = useState(true);
   const [modelStatus, setModelStatus] = useState<ModelStatus>('checking');
   const [modelProgress, setModelProgress] = useState<number | null>(null);
-  const [modelProfile, setModelProfile] = useState<ModelProfile>('AXOM1.0');
+  const [modelProfile, setModelProfile] = useState<ModelProfile>('AXOM1.1');
   const [agents, setAgents] = useState<ManagedAgent[]>(loadManagedAgents);
   const [tasks, setTasks] = useState<ManagedTask[]>(loadManagedTasks);
   const [queueBusy, setQueueBusy] = useState(false);
@@ -905,17 +1004,63 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: conversation.map(({ role, text: content }) => ({ role, content })),
-          files: files.map(({ name, value }) => ({ path: name, content: value })),
+          files: filesRef.current.map(({ name, value }) => ({ path: name, content: value })),
           deepReasoning,
           agents: selectedTeamAgents.map(({ id, name, role, managerId, team }) => ({ id, name, role, managerId, team })),
         }),
       });
-      const payload = await response.json() as { message?: string; error?: string };
+      const payload = await response.json() as {
+        message?: string;
+        error?: string;
+        files?: unknown;
+        teamMessages?: Array<{ agentId?: string; name?: string; text?: string }>;
+      };
       if (!response.ok || typeof payload.message !== 'string' || !payload.message.trim()) {
         throw new Error(payload.error || 'The team could not complete this group chat turn.');
       }
-      const reply: GroupChatMessage = { id: newId(), sender: `${activeChatTeam} team`, role: 'assistant', text: payload.message.trim() };
-      setGroupChats((current) => ({ ...current, [activeChatTeam]: [...(current[activeChatTeam] || []), reply].slice(-40) }));
+      if (payload.files !== undefined) {
+        if (!Array.isArray(payload.files) || !payload.files.every(isGeneratedFilePayload)) {
+          throw new Error('The team returned an invalid project file list.');
+        }
+        const generatedFiles: FileItem[] = payload.files.map((file) => ({
+          id: `generated-${newId()}`,
+          name: file.path,
+          language: getLanguageFromPath(file.path),
+          value: file.content,
+        }));
+        const byPath = new Map(filesRef.current.map((file) => [file.name.toLowerCase(), file]));
+        generatedFiles.forEach((file) => {
+          const existing = byPath.get(file.name.toLowerCase());
+          byPath.set(file.name.toLowerCase(), { ...file, id: existing?.id ?? file.id });
+        });
+        const nextFiles = [...byPath.values()];
+        if (nextFiles.reduce((total, file) => total + file.value.length, 0) > MAX_SOURCE_CONTEXT_CHARS) {
+          throw new Error('The generated project exceeds the 24,000 character source limit.');
+        }
+        filesRef.current = nextFiles;
+        setFiles(nextFiles);
+        setAssets((current) => current.filter((asset) =>
+          !generatedFiles.some((file) => file.name.toLowerCase() === asset.name.toLowerCase()),
+        ));
+        if (generatedFiles.length > 0) {
+          const firstFile = nextFiles.find((file) => file.name.toLowerCase() === generatedFiles[0].name.toLowerCase());
+          if (firstFile) setSelectedFile(firstFile.id);
+          setWorkspaceOpen(true);
+        }
+      }
+      const agentReplies = (payload.teamMessages || []).flatMap((agentMessage): GroupChatMessage[] =>
+        typeof agentMessage.name === 'string' && typeof agentMessage.text === 'string' && agentMessage.text.trim()
+          ? [{ id: newId(), sender: agentMessage.name, role: 'assistant', text: agentMessage.text.trim() }]
+          : [],
+      );
+      const replies: GroupChatMessage[] = [
+        ...agentReplies,
+        { id: newId(), sender: `${activeChatTeam} summary`, role: 'assistant', text: payload.message.trim() },
+      ];
+      setGroupChats((current) => ({
+        ...current,
+        [activeChatTeam]: [...(current[activeChatTeam] || []), ...replies].slice(-40),
+      }));
     } catch (error) {
       setGroupChatError(error instanceof Error ? error.message : 'The team chat request failed.');
       const reply: GroupChatMessage = {
@@ -1043,6 +1188,9 @@ function App() {
         const nextFiles = [...byPath.values()];
         filesRef.current = nextFiles;
         setFiles(nextFiles);
+        setAssets((current) => current.filter((asset) =>
+          !generatedFiles.some((file) => file.name.toLowerCase() === asset.name.toLowerCase()),
+        ));
         const existingSelectedFile = filesRef.current.find(
           (file) => file.name.toLowerCase() === generatedFiles[0].name.toLowerCase(),
         );
@@ -1161,30 +1309,79 @@ function App() {
     if (selected.length === 0) return;
 
     try {
-      const imported = await Promise.all(selected.map(async (file) => {
-        if (file.size > 48000) {
-          throw new Error(`${file.name} is too large to import as a text workspace file.`);
-        }
-        const value = await file.text();
-        if (value.length > 12000 || value.includes('\0')) {
-          throw new Error(`${file.name} is too large or is not a text source file.`);
-        }
-        const name = file.name.replace(/\\/g, '/').split('/').pop() || 'imported.txt';
-        return {
-          id: `imported-${newId()}`,
-          name,
-          language: getLanguageFromPath(name),
-          value,
-        };
-      }));
-      const merged = new Map(files.map((file) => [file.name.toLowerCase(), file]));
-      imported.forEach((file) => merged.set(file.name.toLowerCase(), file));
-      const nextFiles = [...merged.values()];
-      if (nextFiles.reduce((total, file) => total + file.value.length, 0) > 24000) {
-        throw new Error('The workspace exceeds the 24,000 character model-context limit.');
+      const selectedBytes = selected.reduce((total, file) => total + file.size, 0);
+      if (selectedBytes > MAX_ARCHIVE_INPUT_BYTES) {
+        throw new Error('Selected uploads must total 20 MB or less.');
       }
-      setFiles(nextFiles);
-      setSelectedFile(imported[imported.length - 1].id);
+      const importedEntries: ArchiveEntry[] = [];
+      let expandedBytes = 0;
+      for (const file of selected) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        const isZip = file.name.toLowerCase().endsWith('.zip') ||
+          file.type === 'application/zip' ||
+          (data[0] === 0x50 && data[1] === 0x4b);
+        if (isZip) {
+          const archiveEntries = await extractZipEntries(data, MAX_ARCHIVE_OUTPUT_BYTES - expandedBytes);
+          expandedBytes += archiveEntries.reduce((total, entry) => total + entry.data.byteLength, 0);
+          importedEntries.push(...archiveEntries);
+        } else {
+          if (data.byteLength > MAX_ARCHIVE_OUTPUT_BYTES - expandedBytes) {
+            throw new Error('Expanded uploads exceed the 32 MB import limit.');
+          }
+          expandedBytes += data.byteLength;
+          const path = file.name.replace(/\\/g, '/').split('/').pop() || 'imported-file';
+          importedEntries.push({ path, data });
+        }
+        if (importedEntries.length > MAX_WORKSPACE_FILES) {
+          throw new Error(`The project can contain up to ${MAX_WORKSPACE_FILES} files.`);
+        }
+      }
+
+      const nextFiles = new Map(files.map((file) => [file.name.toLowerCase(), file]));
+      const nextAssets = new Map(assets.map((asset) => [asset.name.toLowerCase(), asset]));
+      let selectedSourceId = '';
+      for (const entry of importedEntries) {
+        if (!isSafeWorkspacePath(entry.path)) throw new Error(`Unsafe project path: ${entry.path}`);
+        let value: string | null = null;
+        if (entry.data.byteLength <= MAX_SOURCE_FILE_CHARS) {
+          try {
+            const decoded = new TextDecoder('utf-8', { fatal: true }).decode(entry.data);
+            if (!decoded.includes('\0')) value = decoded;
+          } catch {
+            value = null;
+          }
+        }
+        const key = entry.path.toLowerCase();
+        if (value !== null) {
+          const importedFile: FileItem = {
+            id: `imported-${newId()}`,
+            name: entry.path,
+            language: getLanguageFromPath(entry.path),
+            value,
+          };
+          nextFiles.set(key, importedFile);
+          nextAssets.delete(key);
+          selectedSourceId = importedFile.id;
+        } else {
+          nextFiles.delete(key);
+          nextAssets.set(key, { id: `asset-${newId()}`, name: entry.path, data: entry.data });
+        }
+      }
+
+      const nextFileList = [...nextFiles.values()];
+      const nextAssetList = [...nextAssets.values()];
+      if (nextFileList.length + nextAssetList.length > MAX_WORKSPACE_FILES) {
+        throw new Error(`The project can contain up to ${MAX_WORKSPACE_FILES} files.`);
+      }
+      if (nextFileList.reduce((total, file) => total + file.value.length, 0) > MAX_SOURCE_CONTEXT_CHARS) {
+        throw new Error('Editable source files exceed the 24,000 character model-context limit.');
+      }
+      if (nextAssetList.reduce((total, asset) => total + asset.data.byteLength, 0) > MAX_ASSET_BYTES) {
+        throw new Error('Project attachments exceed the 16 MB asset limit.');
+      }
+      setFiles(nextFileList);
+      setAssets(nextAssetList);
+      if (selectedSourceId) setSelectedFile(selectedSourceId);
       setRequestError('');
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'AXON could not import those files.');
@@ -1202,9 +1399,10 @@ function App() {
   };
 
   const downloadProject = () => {
-    const archive = zipSync(Object.fromEntries(
-      files.map((file) => [file.name, strToU8(file.value)]),
-    ));
+    const archiveEntries: Record<string, Uint8Array> = {};
+    files.forEach((file) => { archiveEntries[file.name] = strToU8(file.value); });
+    assets.forEach((asset) => { archiveEntries[asset.name] = asset.data; });
+    const archive = zipSync(archiveEntries, { level: 1 });
     const archiveBuffer = new ArrayBuffer(archive.byteLength);
     new Uint8Array(archiveBuffer).set(archive);
     const blob = new Blob([archiveBuffer], { type: 'application/zip' });
@@ -1212,6 +1410,17 @@ function App() {
     const url = URL.createObjectURL(blob);
     link.href = url;
     link.download = 'axon-project.zip';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadAsset = (asset: WorkspaceAsset) => {
+    const buffer = new ArrayBuffer(asset.data.byteLength);
+    new Uint8Array(buffer).set(asset.data);
+    const url = URL.createObjectURL(new Blob([buffer]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = asset.name.split('/').pop() || 'project-asset';
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -1264,27 +1473,6 @@ function App() {
           </div>
         </section>
 
-        <div className="panel-block">
-          <div className="panel-header">
-            <span>Workspace files</span>
-            <span className="badge">{files.length}</span>
-          </div>
-          <div className="file-list">
-            {files.map((file) => (
-              <button
-                key={file.id}
-                className={`file-item ${selectedFile === file.id ? 'selected' : ''}`}
-                onClick={() => {
-                  setSelectedFile(file.id);
-                  setWorkspaceOpen(true);
-                }}
-              >
-                <span className="ext">{file.language}</span>
-                {file.name}
-              </button>
-            ))}
-          </div>
-        </div>
         <div className="sidebar-footer">
           <span className={`sidebar-status-dot ${modelStatus === 'loaded' ? 'ready' : ''}`} />
           <span>{modelStatus === 'offline' ? 'Local model offline' : 'Local workspace'}</span>
@@ -1348,7 +1536,7 @@ function App() {
               onClick={() => setWorkspaceOpen((open) => !open)}
               aria-pressed={workspaceOpen}
             >
-              {workspaceOpen ? 'Close workspace' : 'Workspace'}
+              {workspaceOpen ? 'Close build' : 'Build'}
             </button>
             <button
               className={`action-button workspace-toggle ${agentsOpen ? 'selected' : ''}`}
@@ -1377,7 +1565,7 @@ function App() {
               </div>
               <div className="agent-quick-add" aria-label="Quick add specialist">
                 <span>Quick add</span>
-                {agentRoleTemplates.slice(0, 4).map((template) => (
+                {agentRoleTemplates.map((template) => (
                   <button
                     type="button"
                     key={template.name}
@@ -1607,8 +1795,9 @@ function App() {
                                   `Work item for ${agent?.name || 'the team'} (${agent?.role || 'general support'}): ${task.title}`,
                                   task.assigneeId,
                                 );
-                                if (completed) setTasks((current) => current.map((item) =>
-                                  item.id === task.id ? { ...item, status: 'done' } : item));
+                                setTasks((current) => current.map((item) => item.id === task.id
+                                  ? { ...item, status: completed ? 'done' : 'queued' }
+                                  : item));
                               }}
                             >
                               Run
@@ -1783,7 +1972,15 @@ function App() {
             <div className="editor-column workspace-drawer">
               <div className="workspace-drawer-header">
                 <div className="editor-header">
-                  <span>{currentFile.name}</span>
+                  <label className="workspace-file-control">
+                    <span className="visually-hidden">Choose a source file</span>
+                    <select
+                      value={currentFile.id}
+                      onChange={(event) => setSelectedFile(event.target.value)}
+                    >
+                      {files.map((file) => <option value={file.id} key={file.id}>{file.name}</option>)}
+                    </select>
+                  </label>
                   <span className="tiny">{currentFile.language.toUpperCase()}</span>
                 </div>
                 <button className="workspace-close" onClick={() => setWorkspaceOpen(false)} aria-label="Close workspace">
@@ -1807,16 +2004,34 @@ function App() {
                 </label>
                 <button className="action-button" onClick={handleNewFile}>New file</button>
                 <label className="action-button import-files">
-                  Import
-                  <input type="file" multiple onChange={handleImportFiles} />
+                  Add files or ZIP
+                  <input type="file" multiple accept="*/*,.zip" onChange={handleImportFiles} />
                 </label>
                 <button className="action-button secondary" onClick={() => downloadFile(currentFile)}>
                   Download
                 </button>
                 <button className="action-button secondary" onClick={downloadProject}>
-                  ZIP
+                  Export ZIP
                 </button>
               </div>
+              {assets.length > 0 && (
+                <section className="workspace-assets" aria-label="Project attachments">
+                  <div className="workspace-assets-heading">Attachments · included in ZIP</div>
+                  {assets.map((asset) => (
+                    <div className="workspace-asset" key={asset.id}>
+                      <span title={asset.name}>{asset.name}</span>
+                      <button type="button" onClick={() => downloadAsset(asset)} aria-label={`Download ${asset.name}`}>Download</button>
+                      <button
+                        type="button"
+                        onClick={() => setAssets((current) => current.filter((item) => item.id !== asset.id))}
+                        aria-label={`Remove ${asset.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </section>
+              )}
               <button
                 className="action-button run-code-button workspace-run-button"
                 onClick={handleRunCurrentFile}
