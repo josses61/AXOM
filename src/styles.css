@@ -2731,6 +2731,33 @@ textarea:focus-visible {
   font-size: 10px;
 }
 
+.task-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-run-all {
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid rgba(183, 221, 138, 0.42);
+  border-radius: 5px;
+  background: rgba(183, 221, 138, 0.1);
+  color: #d4efb4;
+  font: inherit;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.task-run-all:hover:not(:disabled) {
+  background: rgba(183, 221, 138, 0.2);
+}
+
+.task-run-all:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .task-create,
 .web-scrape-form {
   display: flex;
@@ -4119,6 +4146,41 @@ textarea:focus-visible {
   color: #bddb8c;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+}
+
+.agent-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-quick-add > span {
+  flex: 0 0 100%;
+  color: #a6b2a2;
+  font-size: 9px;
+}
+
+.agent-quick-add button {
+  min-height: 27px;
+  flex: 1 1 42%;
+  padding: 4px 7px;
+  border: 1px solid rgba(213, 230, 205, 0.13);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #dce7d7;
+  font-size: 9px;
+  text-align: left;
+}
+
+.agent-quick-add button:hover:not(:disabled) {
+  border-color: rgba(189, 219, 140, 0.42);
+  background: rgba(189, 219, 140, 0.08);
+}
+
+.agent-quick-add button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .agent-create-form {

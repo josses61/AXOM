@@ -526,6 +526,7 @@ function App() {
   const [modelProfile, setModelProfile] = useState<ModelProfile>('AXOM1.0');
   const [agents, setAgents] = useState<ManagedAgent[]>(loadManagedAgents);
   const [tasks, setTasks] = useState<ManagedTask[]>(loadManagedTasks);
+  const [queueBusy, setQueueBusy] = useState(false);
   const [agentDraftName, setAgentDraftName] = useState('');
   const [agentDraftTeam, setAgentDraftTeam] = useState('Studio');
   const [agentDraftRole, setAgentDraftRole] = useState(agentRoleTemplates[1].role);
@@ -561,6 +562,8 @@ function App() {
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState('');
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef(messages);
+  const filesRef = useRef(files);
   const activeAgents = agents.filter((agent) => agent.enabled);
   const agentTeams = [...new Set(agents.map((agent) => agent.team.trim()).filter(Boolean))];
   if (agentTeams.length === 0) agentTeams.push('Studio');
@@ -571,6 +574,14 @@ function App() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   useEffect(() => {
     localStorage.setItem('axom-agents', JSON.stringify(agents));
@@ -594,11 +605,13 @@ function App() {
 
   const startNewChat = () => {
     setActiveView('assistant');
-    setMessages([{
+    const nextMessages: ChatMessage[] = [{
       id: 1,
       role: 'assistant',
       text: 'AXON workspace ready. Describe a coding task to generate project files with the configured local model adapter.',
-    }]);
+    }];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
     setPrompt('');
     setRequestError('');
     setRunnerError('');
@@ -822,17 +835,19 @@ function App() {
     const task: ManagedTask = {
       id: newId(),
       title: title.slice(0, 180),
-      assigneeId: agents[0]?.id || '',
+      assigneeId: activeAgents[0]?.id || '',
       status: 'queued',
     };
     setTasks((current) => [task, ...current].slice(0, 100));
     setTaskTitle('');
   };
 
-  const handleAddAgent = () => {
-    const name = agentDraftName.trim();
-    const team = agentDraftTeam.trim() || 'Studio';
-    const role = agentDraftRole.trim();
+  const handleAddAgent = (template?: (typeof agentRoleTemplates)[number]) => {
+    const name = template?.name || agentDraftName.trim();
+    const team = template
+      ? activeView === 'team' ? activeChatTeam : agentDraftTeam.trim() || 'Studio'
+      : agentDraftTeam.trim() || 'Studio';
+    const role = template?.role || agentDraftRole.trim();
     if (!name || !role || agents.length >= 8) return;
     const managerId = agents.some((agent) =>
       agent.id === agentDraftManagerId && agent.team === team && !agent.managerId,
@@ -849,6 +864,30 @@ function App() {
     setActiveView('team');
     setAgentDraftName('');
     setAgentDraftManagerId('');
+  };
+
+  const handleRunQueuedTasks = async () => {
+    if (queueBusy || isLoading) return;
+    const queuedTasks = tasks.filter((task) => task.status === 'queued');
+    if (queuedTasks.length === 0 || activeAgents.length === 0) return;
+
+    setQueueBusy(true);
+    for (const task of queuedTasks) {
+      const assignee = activeAgents.find((agent) => agent.id === task.assigneeId) || activeAgents[0];
+      setTasks((current) => current.map((item) => item.id === task.id
+        ? { ...item, assigneeId: assignee.id, status: 'in-progress' }
+        : item));
+      const completed = await handleGenerate(
+        `Work item for ${assignee.name} (${assignee.role}): ${task.title}`,
+        assignee.id,
+        true,
+      );
+      setTasks((current) => current.map((item) => item.id === task.id
+        ? { ...item, status: completed ? 'done' : 'queued' }
+        : item));
+      if (!completed) break;
+    }
+    setQueueBusy(false);
   };
 
   const handleGroupChatSend = async () => {
@@ -933,20 +972,21 @@ function App() {
     void refreshGitHub();
   }, []);
 
-  const handleGenerate = async (requestOverride?: string, selectedAgentId?: string): Promise<boolean> => {
+  const handleGenerate = async (requestOverride?: string, selectedAgentId?: string, fromQueue = false): Promise<boolean> => {
     const request = (requestOverride ?? prompt).trim();
-    if (!request || isLoading) return false;
+    if (!request || isLoading || (queueBusy && !fromQueue)) return false;
     const requestAgents = selectedAgentId
       ? agents.filter((agent) => agent.id === selectedAgentId)
       : activeAgents;
     const requestText = request;
     const conversation = [
-      ...messages.filter((message) => message.role !== 'assistant' || message.id !== 1),
+      ...messagesRef.current.filter((message) => message.role !== 'assistant' || message.id !== 1),
       { id: Date.now(), role: 'user' as const, text: requestText },
     ].slice(-20);
 
     setIsLoading(true);
     setRequestError('');
+    messagesRef.current = conversation;
     setMessages(conversation);
 
     try {
@@ -955,7 +995,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: conversation.map(({ role, text }) => ({ role, content: text })),
-          files: files.map(({ name, value }) => ({ path: name, content: value })),
+          files: filesRef.current.map(({ name, value }) => ({ path: name, content: value })),
           deepReasoning,
           agents: requestAgents.map(({ id, name, role, managerId, team }) => ({ id, name, role, managerId, team })),
         }),
@@ -988,20 +1028,22 @@ function App() {
           }))
           : (() => { throw new Error('AXOM returned an invalid project file list.'); })();
 
-      setMessages((previous) => [
+      const nextMessages: ChatMessage[] = [
         ...conversation,
         { id: Date.now() + 1, role: 'assistant', text: assistantText },
-      ]);
+      ];
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
       if (generatedFiles.length > 0) {
-        setFiles((previous) => {
-          const byPath = new Map(previous.map((file) => [file.name.toLowerCase(), file]));
-          generatedFiles.forEach((file) => {
-            const existing = byPath.get(file.name.toLowerCase());
-            byPath.set(file.name.toLowerCase(), { ...file, id: existing?.id ?? file.id });
-          });
-          return [...byPath.values()];
+        const byPath = new Map(filesRef.current.map((file) => [file.name.toLowerCase(), file]));
+        generatedFiles.forEach((file) => {
+          const existing = byPath.get(file.name.toLowerCase());
+          byPath.set(file.name.toLowerCase(), { ...file, id: existing?.id ?? file.id });
         });
-        const existingSelectedFile = files.find(
+        const nextFiles = [...byPath.values()];
+        filesRef.current = nextFiles;
+        setFiles(nextFiles);
+        const existingSelectedFile = filesRef.current.find(
           (file) => file.name.toLowerCase() === generatedFiles[0].name.toLowerCase(),
         );
         setSelectedFile(existingSelectedFile?.id ?? generatedFiles[0].id);
@@ -1333,6 +1375,20 @@ function App() {
                 <div><h3>Create an agent</h3><p>Choose a specialty, then tailor its instructions.</p></div>
                 <span>{agents.length}/8</span>
               </div>
+              <div className="agent-quick-add" aria-label="Quick add specialist">
+                <span>Quick add</span>
+                {agentRoleTemplates.slice(0, 4).map((template) => (
+                  <button
+                    type="button"
+                    key={template.name}
+                    title={template.role}
+                    disabled={agents.length >= 8}
+                    onClick={() => handleAddAgent(template)}
+                  >
+                    + {template.name}
+                  </button>
+                ))}
+              </div>
               <form className="agent-create-form" onSubmit={(event) => { event.preventDefault(); handleAddAgent(); }}>
                 <label className="agent-field">
                   <span>Name</span>
@@ -1477,7 +1533,17 @@ function App() {
             <section className="tasks-section">
               <div className="github-heading">
                 <h3>Work queue</h3>
-                <span className="task-count">{tasks.length}</span>
+                <div className="task-queue-actions">
+                  <span className="task-count">{tasks.filter((task) => task.status === 'queued').length} queued</span>
+                  <button
+                    className="task-run-all"
+                    type="button"
+                    onClick={() => void handleRunQueuedTasks()}
+                    disabled={queueBusy || isLoading || !tasks.some((task) => task.status === 'queued') || activeAgents.length === 0}
+                  >
+                    {queueBusy ? 'Working…' : 'Run queued'}
+                  </button>
+                </div>
               </div>
               <form className="task-create" onSubmit={(event) => { event.preventDefault(); addTask(); }}>
                 <input
@@ -1511,6 +1577,7 @@ function App() {
                           <select
                             id={`assignee-${task.id}`}
                             value={task.assigneeId}
+                            disabled={queueBusy}
                             onChange={(event) => setTasks((current) => current.map((item) =>
                               item.id === task.id ? { ...item, assigneeId: event.target.value } : item))}
                           >
@@ -1520,6 +1587,7 @@ function App() {
                           <select
                             aria-label={`Status for ${task.title}`}
                             value={task.status}
+                            disabled={queueBusy}
                             onChange={(event) => setTasks((current) => current.map((item) =>
                               item.id === task.id ? { ...item, status: event.target.value as ManagedTask['status'] } : item))}
                           >
@@ -1530,7 +1598,7 @@ function App() {
                           {task.status !== 'done' && task.assigneeId && (
                             <button
                               className="task-run"
-                              disabled={isLoading}
+                              disabled={isLoading || queueBusy}
                               onClick={async () => {
                                 setTasks((current) => current.map((item) =>
                                   item.id === task.id ? { ...item, status: 'in-progress' } : item));
