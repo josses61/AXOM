@@ -1499,6 +1499,15 @@ textarea:focus-visible {
 .main-panel {
   min-width: 0;
   padding: 25px clamp(16px, 3vw, 42px) 34px;
+  background:
+    radial-gradient(circle at top, rgba(131, 213, 182, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(17, 19, 24, 0.8), rgba(17, 19, 24, 0.98));
+}
+
+.workspace-overview {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0 18px;
 }
 
 .topbar {
@@ -1536,16 +1545,31 @@ textarea:focus-visible {
 .upper-card,
 .insight-card {
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 13px;
-  background: #191c22;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(25, 28, 34, 0.96), rgba(18, 21, 27, 0.94));
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.12);
 }
 
 .upper-card {
   display: flex;
   justify-content: space-between;
   gap: 15px;
-  margin: 20px 0 13px;
-  padding: 16px 18px;
+  margin: 0;
+  padding: 18px 20px;
+  align-items: center;
+}
+
+.upper-card h3 {
+  margin-top: 6px;
+  font-size: clamp(15px, 1.8vw, 18px);
+}
+
+.top-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
 }
 
 .upper-card h3 {
@@ -1565,7 +1589,12 @@ textarea:focus-visible {
 .top-actions {
   flex-wrap: wrap;
   gap: 8px;
-  margin: 12px 0;
+  margin: 0;
+}
+
+.quick-prompts {
+  display: flex;
+  margin-top: 2px;
 }
 
 .prompt-chip,
@@ -1575,10 +1604,27 @@ textarea:focus-visible {
   min-height: 34px;
   padding: 8px 11px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: #20242b;
+  border-radius: 10px;
+  background: rgba(32, 36, 43, 0.9);
   color: #d7dce4;
   font-size: 11px;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.prompt-chip {
+  flex: 1 1 180px;
+  justify-content: flex-start;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.prompt-chip:hover,
+.action-button:hover,
+.primary:hover,
+.ghost:hover {
+  transform: translateY(-1px);
+  border-color: rgba(131, 213, 182, 0.32);
+  background: rgba(41, 47, 56, 1);
 }
 
 .prompt-chip:hover,
@@ -3307,6 +3353,30 @@ textarea:focus-visible {
   box-shadow: 0 18px 52px rgba(0, 0, 0, 0.45);
 }
 
+.team-group {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.team-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 0;
+  color: #edf2e9;
+  font-size: 11px;
+}
+
+.team-group-header span {
+  color: #8a958a;
+}
+
 .agent-drawer-header,
 .agent-item-topline,
 .github-heading {
@@ -3872,6 +3942,75 @@ textarea:focus-visible {
 
 .channel-avatar.agent {
   background: #435845;
+}
+
+.mission-board {
+  background: linear-gradient(180deg, rgba(20, 22, 26, 0.96), rgba(11, 12, 15, 0.99));
+  border: 1px solid rgba(131, 213, 182, 0.12);
+  border-radius: 14px;
+}
+
+.mission-post {
+  display: grid;
+  gap: 10px;
+  padding: 12px 12px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.mission-post.user {
+  border-color: rgba(131, 213, 182, 0.24);
+  background: rgba(131, 213, 182, 0.05);
+}
+
+.mission-post.assistant {
+  border-color: rgba(147, 179, 255, 0.18);
+  background: rgba(76, 107, 176, 0.06);
+}
+
+.mission-post-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mission-author {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.mission-author strong {
+  display: block;
+  color: #edf2e9;
+  font-size: 12px;
+}
+
+.mission-author small {
+  display: block;
+  color: #8d988c;
+  font-size: 9px;
+}
+
+.mission-tag {
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #c3cfd3;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mission-post p {
+  margin: 0;
+  color: #e5e9ee;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .team-channel-transcript {

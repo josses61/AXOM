@@ -277,6 +277,17 @@ const agentRoleTemplates = [
   { name: 'Writer', role: 'Create concise, accurate documentation and user-facing copy that matches the product and implementation.' },
 ];
 
+const humanNamesByRole: Record<string, string[]> = {
+  Researcher: ['Maya Collins', 'Ethan Ross', 'Nora Patel', 'Theo Grant', 'Ava West', 'Isaac Shaw'],
+  Builder: ['Lucas Reed', 'Sofia Nguyen', 'Miles Hart', 'Harper Brooks', 'Owen Price', 'Clara Stone'],
+  Reviewer: ['Olivia James', 'Daniel Moss', 'Leah Kim', 'Mason Bell', 'Sarah Doyle', 'Jacob Lane'],
+  Designer: ['Chloe Foster', 'Noah Hayes', 'Emma Cole', 'Lucas Finch', 'Aria Bell', 'Samir Hale'],
+  Security: ['Priya Shah', 'Dylan Park', 'Nadia King', 'Carter Quinn', 'Ruby Fox', 'Leo Carter'],
+  Writer: ['Jade Morgan', 'Felix Green', 'Ivy Chen', 'Caleb Young', 'Mina Ross', 'Ari Holt'],
+};
+
+const teamTemplates = ['Executive', 'Research', 'Engineering', 'Design', 'Operations', 'Product'];
+
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 function loadManagedTasks(): ManagedTask[] {
@@ -296,9 +307,17 @@ function loadManagedTasks(): ManagedTask[] {
 }
 
 const defaultAgents: ManagedAgent[] = [
-  { id: 'research', name: 'Scout', role: 'Research relevant APIs, documentation, constraints, and current best practices.', enabled: true, team: 'Studio', managerId: '' },
-  { id: 'builder', name: 'Builder', role: 'Turn the request into a coherent implementation and identify the files or steps required.', enabled: true, team: 'Studio', managerId: 'research' },
-  { id: 'reviewer', name: 'Reviewer', role: 'Review the proposed solution for bugs, security risks, missing requirements, and useful tests.', enabled: true, team: 'Studio', managerId: 'research' },
+  { id: 'director', name: 'Ava Rowan', role: 'Runs the overall mission, delegates to team leaders, and keeps the full project aligned with the end goal.', enabled: true, team: 'Executive', managerId: '' },
+  { id: 'research-lead', name: 'Noah Patel', role: 'Leads the research team, gathers facts, validates assumptions, and feeds the best evidence to the rest of the org.', enabled: true, team: 'Research', managerId: 'director' },
+  { id: 'engineering-lead', name: 'Lucas Reed', role: 'Leads the build team, turns direction into implementation, and keeps the product architecture coherent.', enabled: true, team: 'Engineering', managerId: 'director' },
+  { id: 'design-lead', name: 'Chloe Foster', role: 'Leads the design system, shapes user flows, and ensures the product feels polished and understandable.', enabled: true, team: 'Design', managerId: 'director' },
+  { id: 'ops-lead', name: 'Priya Shah', role: 'Coordinates reviews, execution quality, and the operating rhythm across the product teams.', enabled: true, team: 'Operations', managerId: 'director' },
+  { id: 'researcher-1', name: 'Maya Collins', role: 'Finds relevant documentation, APIs, constraints, and current best practices. Separates evidence from assumptions.', enabled: true, team: 'Research', managerId: 'research-lead' },
+  { id: 'researcher-2', name: 'Ethan Ross', role: 'Builds research briefs, summarizes findings, and converts the discovered constraints into clear recommendations.', enabled: true, team: 'Research', managerId: 'research-lead' },
+  { id: 'builder-1', name: 'Harper Brooks', role: 'Turns requirements into working implementation and identifies the files and steps required to ship safely.', enabled: true, team: 'Engineering', managerId: 'engineering-lead' },
+  { id: 'builder-2', name: 'Sofia Nguyen', role: 'Implements the core product flow and keeps the system cohesive while the rest of the team reviews it.', enabled: true, team: 'Engineering', managerId: 'engineering-lead' },
+  { id: 'reviewer-1', name: 'Olivia James', role: 'Checks for product gaps, security risks, missing requirements, and test coverage before release.', enabled: true, team: 'Operations', managerId: 'ops-lead' },
+  { id: 'designer-1', name: 'Emma Cole', role: 'Shapes the visual language, interface layout, and usability decisions for the product experience.', enabled: true, team: 'Design', managerId: 'design-lead' },
 ];
 
 function loadAgentChats(): Record<string, AgentChatMessage[]> {
@@ -632,7 +651,7 @@ function App() {
   const [agentDraftTemplate, setAgentDraftTemplate] = useState('Builder');
   const [agentDraftManagerId, setAgentDraftManagerId] = useState('');
   const [agentChats, setAgentChats] = useState<Record<string, AgentChatMessage[]>>(loadAgentChats);
-  const [selectedAgentId, setSelectedAgentId] = useState('research');
+  const [selectedAgentId, setSelectedAgentId] = useState('director');
   const [agentChatDraft, setAgentChatDraft] = useState('');
   const [agentChatBusy, setAgentChatBusy] = useState(false);
   const [agentChatError, setAgentChatError] = useState('');
@@ -666,6 +685,27 @@ function App() {
   const agentTeams = [...new Set(agents.map((agent) => agent.team.trim()).filter(Boolean))];
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) || activeAgents[0] || agents[0];
   const selectedAgentMessages = selectedAgent ? agentChats[selectedAgent.id] || [] : [];
+  const teamGroups = useMemo(() => {
+    return agents.reduce<Record<string, ManagedAgent[]>>((accumulator, agent) => {
+      const team = agent.team.trim() || 'Unassigned';
+      accumulator[team] = [...(accumulator[team] || []), agent];
+      return accumulator;
+    }, {});
+  }, [agents]);
+  const missionBoardMessages = useMemo(() => {
+    const rows = Object.entries(agentChats).flatMap(([agentId, messages]) => {
+      const agent = agents.find((entry) => entry.id === agentId);
+      return messages.map((message) => ({
+        ...message,
+        agentName: agent?.name || 'Unknown agent',
+        team: agent?.team || 'Unassigned',
+      }));
+    });
+    return rows.sort((left, right) => left.id.localeCompare(right.id)).slice(-80);
+  }, [agentChats, agents]);
+  const selectedBoardMessages = selectedAgent
+    ? missionBoardMessages.filter((message) => message.team === selectedAgent.team || message.agentName === selectedAgent.name)
+    : missionBoardMessages;
   const selectedGitHubOwner = githubRepository.split('/')[0] || '';
   const selectedGitHubOwnerTrusted = githubTrustedAuthors.some((author) => author.toLowerCase() === selectedGitHubOwner.toLowerCase());
 
@@ -718,6 +758,11 @@ function App() {
     setAgentChatDraft('');
     setRunnerError('');
     setRunnerResult(null);
+  };
+
+  const handleQuickPrompt = (text: string) => {
+    setPrompt(text);
+    setRequestError('');
   };
 
   useEffect(() => {
@@ -945,25 +990,29 @@ function App() {
   };
 
   const handleAddAgent = (template?: (typeof agentRoleTemplates)[number]) => {
-    const requestedName = template?.name || agentDraftName.trim() ||
-      (agentDraftTemplate === 'Custom' ? 'Agent' : agentDraftTemplate);
-    const existingNames = new Set(agents.map((agent) => agent.name.toLowerCase()));
-    let name = requestedName;
-    let suffix = 2;
-    while (existingNames.has(name.toLowerCase())) {
-      name = `${requestedName} ${suffix}`;
-      suffix += 1;
-    }
-    const team = agentDraftTeam.trim() || 'Studio';
+    const team = agentDraftTeam.trim() || selectedAgent?.team || 'Research';
+    const nameSeed = template?.name || agentDraftName.trim() || agentDraftTemplate;
+    const pool = humanNamesByRole[template?.name || agentDraftTemplate] || [
+      'Alicia Brooks', 'Milo Grant', 'Rae Walker', 'Jonah Price', 'Nina Cook', 'Omar Ellis',
+    ];
+    const usedNames = new Set(agents.map((agent) => agent.name.toLowerCase()));
+    const nextName = (() => {
+      const base = nameSeed && nameSeed !== 'Custom' ? nameSeed : pool[0];
+      const baseName = /[A-Z][a-z]+\s[A-Z][a-z]+/.test(base) ? base : pool[0];
+      if (!usedNames.has(baseName.toLowerCase())) return baseName;
+      let index = 1;
+      while (usedNames.has(`${baseName} ${index}`.toLowerCase())) index += 1;
+      return `${baseName} ${index}`;
+    })();
     const role = template?.role || agentDraftRole.trim();
-    if (!role || agents.length >= 8) return;
+    if (!role || agents.length >= 20) return;
     const managerId = agents.some((agent) =>
       agent.id === agentDraftManagerId && agent.team === team && !agent.managerId,
-    ) ? agentDraftManagerId : '';
+    ) ? agentDraftManagerId : (selectedAgent && selectedAgent.team === team ? selectedAgent.id : '');
     const id = newId();
     setAgents((current) => [...current, {
       id,
-      name: name.slice(0, 48),
+      name: nextName.slice(0, 48),
       role: role.slice(0, 400),
       enabled: true,
       team: team.slice(0, 48),
@@ -1558,6 +1607,66 @@ function App() {
           </div>
         </header>
 
+        <section className="workspace-overview" aria-label="AXON overview">
+          <div className="upper-card">
+            <div>
+              <span className="eyebrow">Operations overview</span>
+              <h3>{selectedAgent ? `${selectedAgent.name} is guiding the current mission` : 'Build a specialist team to start shipping'}</h3>
+              <div className="mini-metrics">
+                <span>{agents.length} active agents</span>
+                <span>{Object.keys(teamGroups).length} teams</span>
+                <span>{tasks.filter((task) => task.status === 'done').length} completed tasks</span>
+              </div>
+            </div>
+            <div className="top-actions">
+              <button className="primary" type="button" onClick={() => downloadProject()}>
+                Package ZIP
+              </button>
+              <button className="primary" type="button" onClick={() => void handleRunQueuedTasks()} disabled={queueBusy || isLoading || !tasks.some((task) => task.status === 'queued') || activeAgents.length === 0}>
+                Run queue
+              </button>
+              <button className="ghost" type="button" onClick={() => setWorkspaceOpen((open) => !open)}>
+                {workspaceOpen ? 'Hide build' : 'Open build'}
+              </button>
+            </div>
+          </div>
+
+          <div className="insights-grid">
+            <article className="insight-card">
+              <span className="eyebrow">Org</span>
+              <h3>{activeAgents.length} specialists online</h3>
+              <ul>
+                {Object.entries(teamGroups).slice(0, 3).map(([team, members]) => <li key={team}>{team} · {members.length}</li>)}
+                {Object.keys(teamGroups).length === 0 && <li>No teams active</li>}
+              </ul>
+            </article>
+            <article className="insight-card">
+              <span className="eyebrow">Execution</span>
+              <h3>{tasks.filter((task) => task.status !== 'done').length} open items</h3>
+              <ul>
+                <li>{tasks.filter((task) => task.status === 'queued').length} queued</li>
+                <li>{tasks.filter((task) => task.status === 'in-progress').length} in progress</li>
+              </ul>
+            </article>
+            <article className="insight-card">
+              <span className="eyebrow">Source</span>
+              <h3>{files.length} files in workspace</h3>
+              <ul>
+                <li>{assets.length} attached asset{assets.length === 1 ? '' : 's'}</li>
+                <li>{currentFile.name}</li>
+              </ul>
+            </article>
+          </div>
+
+          <div className="quick-prompts" aria-label="Suggested prompts">
+            {quickPrompts.map((item) => (
+              <button key={item} type="button" className="prompt-chip" onClick={() => handleQuickPrompt(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+        </section>
+
         {agentsOpen && (
           <aside className="agent-drawer" id="agent-manager" aria-label="Agents and GitHub">
             <div className="agent-drawer-header">
@@ -1652,77 +1761,85 @@ function App() {
               </form>
             </section>
             <div className="agent-list">
-              {agents.map((agent) => (
-                <details className="agent-item" key={agent.id}>
-                  <summary className="agent-summary">
-                    <span className="agent-summary-name">{agent.name || 'Unnamed agent'}</span>
-                    <span className="agent-summary-meta">{agent.team || 'No team'} · {agent.managerId ? 'Specialist' : 'Group lead'}</span>
-                  </summary>
-                  <div className="agent-editor-fields">
-                  <div className="agent-item-topline">
-                    <label className="agent-enabled">
-                      <input
-                        type="checkbox"
-                        checked={agent.enabled}
-                        onChange={(event) => setAgents((current) => current.map((item) =>
-                          item.id === agent.id ? { ...item, enabled: event.target.checked } : item))}
-                      />
-                      <span>Assigned</span>
-                    </label>
-                    <span className="agent-rank">
-                      {agent.managerId ? 'Specialist' : `Group lead · ${agents.filter((item) => item.managerId === agent.id).length}`}
-                    </span>
-                    <button
-                      className="agent-remove"
-                      onClick={() => setAgents((current) => current.filter((item) => item.id !== agent.id))}
-                      aria-label={`Remove ${agent.name}`}
-                    >
-                      Remove
-                    </button>
+              {Object.entries(teamGroups).map(([team, teamAgents]) => (
+                <div className="team-group" key={team}>
+                  <div className="team-group-header">
+                    <strong>{team}</strong>
+                    <span>{teamAgents.length} members</span>
                   </div>
-                  <label className="agent-field">
-                    <span>Name</span>
-                    <input
-                      value={agent.name}
-                      maxLength={48}
-                      onChange={(event) => setAgents((current) => current.map((item) =>
-                        item.id === agent.id ? { ...item, name: event.target.value } : item))}
-                    />
-                  </label>
-                  <label className="agent-field">
-                    <span>Team</span>
-                    <input
-                      value={agent.team}
-                      maxLength={48}
-                      onChange={(event) => setAgents((current) => current.map((item) =>
-                        item.id === agent.id ? { ...item, team: event.target.value, managerId: '' } : item))}
-                    />
-                  </label>
-                  <label className="agent-field">
-                    <span>Reports to</span>
-                    <select
-                      value={agent.managerId}
-                      onChange={(event) => setAgents((current) => current.map((item) =>
-                        item.id === agent.id ? { ...item, managerId: event.target.value } : item))}
-                    >
-                      <option value="">Group lead</option>
-                      {agents.filter((candidate) => candidate.id !== agent.id && candidate.team === agent.team && !candidate.managerId)
-                        .map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="agent-field">
-                    <span>Role</span>
-                    <textarea
-                      value={agent.role}
-                      maxLength={400}
-                      rows={3}
-                      placeholder="Describe this agent's specialty and how it should approach work."
-                      onChange={(event) => setAgents((current) => current.map((item) =>
-                        item.id === agent.id ? { ...item, role: event.target.value } : item))}
-                    />
-                  </label>
-                  </div>
-                </details>
+                  {teamAgents.map((agent) => (
+                    <details className="agent-item" key={agent.id}>
+                      <summary className="agent-summary">
+                        <span className="agent-summary-name">{agent.name || 'Unnamed agent'}</span>
+                        <span className="agent-summary-meta">{agent.team || 'No team'} · {agent.managerId ? 'Specialist' : 'Group lead'}</span>
+                      </summary>
+                      <div className="agent-editor-fields">
+                        <div className="agent-item-topline">
+                          <label className="agent-enabled">
+                            <input
+                              type="checkbox"
+                              checked={agent.enabled}
+                              onChange={(event) => setAgents((current) => current.map((item) =>
+                                item.id === agent.id ? { ...item, enabled: event.target.checked } : item))}
+                            />
+                            <span>Assigned</span>
+                          </label>
+                          <span className="agent-rank">
+                            {agent.managerId ? 'Specialist' : `Group lead · ${agents.filter((item) => item.managerId === agent.id).length}`}
+                          </span>
+                          <button
+                            className="agent-remove"
+                            onClick={() => setAgents((current) => current.filter((item) => item.id !== agent.id))}
+                            aria-label={`Remove ${agent.name}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <label className="agent-field">
+                          <span>Name</span>
+                          <input
+                            value={agent.name}
+                            maxLength={48}
+                            onChange={(event) => setAgents((current) => current.map((item) =>
+                              item.id === agent.id ? { ...item, name: event.target.value } : item))}
+                          />
+                        </label>
+                        <label className="agent-field">
+                          <span>Team</span>
+                          <input
+                            value={agent.team}
+                            maxLength={48}
+                            onChange={(event) => setAgents((current) => current.map((item) =>
+                              item.id === agent.id ? { ...item, team: event.target.value, managerId: '' } : item))}
+                          />
+                        </label>
+                        <label className="agent-field">
+                          <span>Reports to</span>
+                          <select
+                            value={agent.managerId}
+                            onChange={(event) => setAgents((current) => current.map((item) =>
+                              item.id === agent.id ? { ...item, managerId: event.target.value } : item))}
+                          >
+                            <option value="">Group lead</option>
+                            {agents.filter((candidate) => candidate.id !== agent.id && candidate.team === agent.team && !candidate.managerId)
+                              .map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+                          </select>
+                        </label>
+                        <label className="agent-field">
+                          <span>Role</span>
+                          <textarea
+                            value={agent.role}
+                            maxLength={400}
+                            rows={3}
+                            placeholder="Describe this agent's specialty and how it should approach work."
+                            onChange={(event) => setAgents((current) => current.map((item) =>
+                              item.id === agent.id ? { ...item, role: event.target.value } : item))}
+                          />
+                        </label>
+                      </div>
+                    </details>
+                  ))}
+                </div>
               ))}
             </div>
 
@@ -2121,38 +2238,47 @@ function App() {
                   </button>
                 )}
               </header>
-              <div className="team-channel-transcript" aria-live="polite">
-                {selectedAgentMessages.length === 0 ? (
+              <div className="team-channel-transcript mission-board" aria-live="polite">
+                {selectedBoardMessages.length === 0 ? (
                   <div className="channel-empty-state">
                     <span className="channel-avatar agent">{selectedAgent?.name.slice(0, 1).toUpperCase() || 'A'}</span>
-                    <h2>{selectedAgent ? `Start a chat with ${selectedAgent.name}` : 'Create your first agent'}</h2>
+                    <h2>{selectedAgent ? `Board for ${selectedAgent.team}` : 'Create your first agent'}</h2>
                     <p>
                       {selectedAgent
-                        ? 'Describe a task or ask a question. This agent will lead while the other enabled agents discuss their findings here. Paste a public page URL to have them read it.'
-                        : 'Use the Agents button to create a specialist. Each agent gets its own chat.'}
+                        ? 'This mission board shows the work updates flowing across the selected team. Each specialist reports in here as their work advances.'
+                        : 'Use the Agents button to create a specialist. Each team gets its own board.'}
                     </p>
                   </div>
-                ) : selectedAgentMessages.map((message) => (
-                  <article className={`channel-message ${message.role}`} key={message.id}>
-                    <div className={`channel-avatar ${message.role === 'user' ? 'human' : 'agent'}`}>
-                      {message.sender.slice(0, 1).toUpperCase()}
-                    </div>
-                    <div className="channel-message-body">
-                      <div className="channel-message-meta">
-                        <strong>{message.sender}</strong>
-                        <time>{message.role === 'assistant' ? 'agent response' : 'you'}</time>
+                ) : (
+                  selectedBoardMessages.map((message) => (
+                    <article className={`mission-post ${message.role}`} key={`${message.id}-${message.agentName}`}>
+                      <div className="mission-post-header">
+                        <div className="mission-author">
+                          <span className="channel-avatar agent">{message.agentName.slice(0, 1).toUpperCase()}</span>
+                          <div>
+                            <strong>{message.agentName}</strong>
+                            <small>{message.team}</small>
+                          </div>
+                        </div>
+                        <span className="mission-tag">{message.role === 'assistant' ? 'team update' : 'directive'}</span>
                       </div>
                       <p>{message.text}</p>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  ))
+                )}
                 {agentChatBusy && (
-                  <article className="channel-message assistant">
-                    <div className="channel-avatar agent">{selectedAgent?.name.slice(0, 1).toUpperCase() || 'A'}</div>
-                    <div className="channel-message-body">
-                      <strong>{selectedAgent?.name || 'Agents'} and collaborators</strong>
-                      <p className="chat-thinking">Working together…</p>
+                  <article className="mission-post assistant">
+                    <div className="mission-post-header">
+                      <div className="mission-author">
+                        <span className="channel-avatar agent">{selectedAgent?.name.slice(0, 1).toUpperCase() || 'A'}</span>
+                        <div>
+                          <strong>{selectedAgent?.name || 'Projects team'}</strong>
+                          <small>{selectedAgent?.team || 'mission board'}</small>
+                        </div>
+                      </div>
+                      <span className="mission-tag">working</span>
                     </div>
+                    <p className="chat-thinking">Agents are working together and sending updates…</p>
                   </article>
                 )}
                 {agentChatError && <p className="channel-error" role="alert">{agentChatError}</p>}
