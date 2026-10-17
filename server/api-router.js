@@ -1226,12 +1226,23 @@ async function findRequestedWebPages(query) {
   return { context: contexts.join('\n\n'), sources, knowledge, warning: warnings.join(' ') };
 }
 
+function shouldSearchPublicKnowledge(query) {
+  return /\bresearch\b|\b(?:browse\s+(?:the\s+)?web|search\s+(?:the\s+)?(?:web|internet|online|github|docs?|documentation)|look\s+up\s+(?:the\s+)?(?:web|internet|online|latest|current|docs?|documentation)|find\s+(?:online|recent|current|latest)\s+(?:information|sources?|docs?|documentation)|(?:latest|current|recent)\s+(?:news|release|version|pricing|documentation))\b|https?:\/\//i.test(query);
+}
+
 async function findPublicKnowledge(query) {
-  const [webResult, githubResult, requestedPagesResult] = await Promise.allSettled([
-    findWebKnowledge(query),
-    findGitHubKnowledge(query),
-    findRequestedWebPages(query),
-  ]);
+  const emptyResult = { context: '', sources: [], knowledge: [] };
+  const [webResult, githubResult, requestedPagesResult] = shouldSearchPublicKnowledge(query)
+    ? await Promise.allSettled([
+        findWebKnowledge(query),
+        findGitHubKnowledge(query),
+        findRequestedWebPages(query),
+      ])
+    : [
+        { status: 'fulfilled', value: emptyResult },
+        { status: 'fulfilled', value: emptyResult },
+        { status: 'fulfilled', value: emptyResult },
+      ];
   const web = webResult.status === 'fulfilled'
     ? webResult.value
     : { context: '', sources: [], knowledge: [] };
