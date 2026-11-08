@@ -57,14 +57,15 @@ function run(command, args, cwd, stdin = '') {
     }, RUN_TIMEOUT_MS);
 
     const collect = (stream, chunk) => {
-      const next = stream === 'stdout' ? stdout + chunk : stderr + chunk;
-      const remaining = Math.max(0, MAX_OUTPUT_CHARS - (stream === 'stdout' ? stderr.length : stdout.length));
-      if (stream === 'stdout') stdout = next.slice(0, remaining);
-      else stderr = next.slice(0, remaining);
-      if (next.length > remaining) {
+      // Track the combined length of both streams against a single shared cap.
+      const combined = stdout.length + stderr.length + chunk.length;
+      if (combined > MAX_OUTPUT_CHARS) {
         outputExceeded = true;
         killProcessGroup();
+        return;
       }
+      if (stream === 'stdout') stdout += chunk;
+      else stderr += chunk;
     };
 
     child.stdout.setEncoding('utf8');
@@ -143,6 +144,9 @@ try {
     }
   } else if (execution) {
     result = await run(execution[0], execution[1], workspaceRoot, stdin);
+  } else {
+    // Unreachable: guarded above, but keeps result defined for the emit below.
+    throw new Error(`No isolated runtime is configured for ${extension || 'files without an extension'}.`);
   }
 
   emit({

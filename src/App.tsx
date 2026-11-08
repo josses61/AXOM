@@ -7,8 +7,6 @@ type ChatMessage = {
   text: string;
 };
 
-type ModeKey = 'build' | 'fix' | 'refactor' | 'explain' | 'design';
-
 type FileItem = {
   id: string;
   name: string;
@@ -73,12 +71,6 @@ type GitHubRepository = {
 };
 
 type ModelProfile = 'AXOM1.0' | 'AXOM1.1';
-
-type AgentPlanStep = {
-  id: string;
-  label: string;
-  status: 'planned' | 'active' | 'done';
-};
 
 type ModelStatus = 'checking' | 'not-loaded' | 'switching' | 'loading' | 'loaded' | 'unavailable' | 'offline';
 
@@ -381,242 +373,6 @@ function isRunnableWorkspaceFile(path: string): boolean {
   return /\.(c|cc|cpp|cxx|go|java|mjs|js|py|rs)$/i.test(path);
 }
 
-function buildProjectBlueprint(prompt: string) {
-  const text = prompt.toLowerCase();
-
-  if (text.includes('dashboard')) return 'analytics dashboard';
-  if (text.includes('landing') || text.includes('saas') || text.includes('startup')) return 'startup landing page';
-  if (text.includes('auth') || text.includes('login')) return 'auth system';
-  if (text.includes('crm') || text.includes('sales')) return 'CRM workspace';
-  if (text.includes('portfolio') || text.includes('personal')) return 'portfolio site';
-  if (text.includes('ecommerce') || text.includes('shop')) return 'ecommerce storefront';
-  return 'AI product workspace';
-}
-
-function createAxonResponse(mode: ModeKey, prompt: string) {
-  const basePrompt = prompt.trim() || 'an elegant product experience';
-  const blueprint = buildProjectBlueprint(basePrompt);
-
-  const appCode = `import { useMemo, useState } from 'react';
-
-const metrics = [
-  { label: 'Performance', value: '96.4%' },
-  { label: 'Mrr', value: '$184k' },
-  { label: 'Velocity', value: '2.4x' },
-];
-
-const tasks = [
-  'Map product requirements',
-  'Design the system architecture',
-  'Ship the working interface',
-];
-
-export default function App() {
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  const activeTask = useMemo(() => tasks[activeIndex], [activeIndex]);
-
-  return (
-    <main className="axon-shell">
-      <section className="axon-panel">
-        <header className="axon-header">
-          <div>
-            <span className="axon-badge">AXON</span>
-            <h1>${blueprint}</h1>
-          </div>
-          <button className="axon-button">Launch</button>
-        </header>
-
-        <div className="axon-metrics">
-          {metrics.map((metric) => (
-            <article key={metric.label} className="axon-metric">
-              <small>{metric.label}</small>
-              <strong>{metric.value}</strong>
-            </article>
-          ))}
-        </div>
-
-        <div className="axon-content">
-          <div className="axon-card">
-            <p className="axon-label">Current focus</p>
-            <h3>{activeTask}</h3>
-            <p>
-              AXON interprets the request, structures the plan, and generates a coherent product flow for ${basePrompt}.
-            </p>
-          </div>
-
-          <div className="axon-sidebar">
-            {tasks.map((task, index) => (
-              <button
-                key={task}
-                className={'axon-task ' + (index === activeIndex ? 'selected' : '')}
-                onClick={() => setActiveIndex(index)}
-              >
-                {task}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-    </main>
-  );
-}`;
-
-  const stylesCode = `
-.axon-shell {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  background:
-    radial-gradient(circle at top left, rgba(59,130,246,0.18), transparent 30%),
-    linear-gradient(135deg, #020817, #0b1220 40%, #111827 100%);
-  color: #edf6ff;
-  padding: 32px;
-}
-
-.axon-panel {
-  width: min(980px, 100%);
-  background: rgba(15, 23, 42, 0.82);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 24px;
-  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.45);
-  padding: 28px;
-}
-
-.axon-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-
-.axon-badge {
-  display: inline-block;
-  padding: 0.42rem 0.7rem;
-  border-radius: 999px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  background: rgba(96, 165, 250, 0.16);
-  color: #dbeafe;
-}
-
-h1 {
-  margin: 0.8rem 0 0;
-  font-size: clamp(2rem, 3vw, 3.2rem);
-}
-
-.axon-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 24px;
-}
-
-.axon-metric,
-.axon-card {
-  background: rgba(15, 23, 42, 0.68);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  border-radius: 18px;
-  padding: 18px;
-}
-
-.axon-metric small,
-.axon-label {
-  color: #93c5fd;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 11px;
-}
-
-.axon-metric strong {
-  display: block;
-  margin-top: 10px;
-  font-size: 1.8rem;
-}
-
-.axon-content {
-  display: grid;
-  grid-template-columns: 1.3fr 0.7fr;
-  gap: 16px;
-  margin-top: 24px;
-}
-
-.axon-card {
-  min-height: 220px;
-}
-
-.axon-sidebar {
-  display: grid;
-  gap: 10px;
-}
-
-.axon-task {
-  padding: 0.8rem 1rem;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.7);
-  color: #e2e8f0;
-  text-align: left;
-}
-
-.axon-task.selected {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(168, 85, 247, 0.18));
-  border-color: rgba(96, 165, 250, 0.52);
-}
-
-.axon-button {
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  border: none;
-  border-radius: 12px;
-  color: white;
-  padding: 0.8rem 1.1rem;
-  cursor: pointer;
-}
-`;
-
-  const readmeCode = `# AXON generated project
-
-## Goal
-${basePrompt}
-
-## Stack
-- React
-- TypeScript
-- Browser-first workflow
-
-## Run
-npm install
-npm run dev -- --host 0.0.0.0
-`;
-
-  const nextPlan: AgentPlanStep[] = [
-    { id: 'understand', label: 'Understand user goal', status: 'done' },
-    { id: 'architect', label: 'Map architecture', status: 'done' },
-    { id: 'implement', label: 'Generate core UI', status: 'active' },
-    { id: 'verify', label: 'Validate flow', status: 'planned' },
-  ];
-
-  const actionList = {
-    build: ['Architect the system', 'Generate the core UI', 'Validate the interaction flow'],
-    fix: ['Trace the root cause', 'Patch state and logic', 'Check edge cases'],
-    refactor: ['Reduce duplication', 'Split responsibilities', 'Re-check behavior'],
-    explain: ['Map the system flow', 'Identify constraints', 'Recommend the cleanest path'],
-    design: ['Shape the visual language', 'Refine the interaction model', 'Balance clarity and conversion'],
-  } as const;
-
-  return {
-    summary: `AXON reviewed the request for ${basePrompt} and mapped a working execution plan for a ${blueprint}.`,
-    plan: nextPlan,
-    actions: actionList[mode],
-    files: [
-      { id: 'app', name: 'App.tsx', language: 'tsx', value: appCode },
-      { id: 'styles', name: 'styles.css', language: 'css', value: stylesCode },
-      { id: 'readme', name: 'README.md', language: 'md', value: readmeCode },
-    ],
-  };
-}
-
 function App() {
   const [prompt, setPrompt] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -853,6 +609,7 @@ function App() {
   };
 
   const handleModelProfileChange = async (profile: ModelProfile) => {
+    const previousProfile = modelProfile;
     setModelProfile(profile);
     setModelStatus('switching');
     setRequestError('');
@@ -866,6 +623,8 @@ function App() {
       if (!response.ok) throw new Error(payload.error || 'The model profile could not be changed.');
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'The model profile could not be changed.');
+      // Restore the previous profile so the selector stays in sync.
+      setModelProfile(previousProfile);
       setModelStatus('unavailable');
     }
   };
@@ -1462,7 +1221,8 @@ function App() {
     link.href = url;
     link.download = file.name;
     link.click();
-    URL.revokeObjectURL(url);
+    // Delay revocation so the browser has time to start the download.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const downloadProject = () => {
@@ -1574,7 +1334,11 @@ function App() {
                 <option value="AXOM1.1">AXOM 1.1 · 1.5B</option>
               </select>
             </label>
-            <span className={`status-pill ${modelStatus === 'loaded' ? 'online' : ''}`}>
+            <span
+              className={`status-pill ${modelStatus === 'loaded' ? 'online' : ''}`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
               {(modelStatus === 'loading' || modelStatus === 'switching') && modelProgress !== null
                 ? `Loading model ${modelProgress}%`
                 : modelStatus === 'loading' || modelStatus === 'switching'

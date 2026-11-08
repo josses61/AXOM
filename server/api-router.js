@@ -276,14 +276,15 @@ function executeInRunner(files, entrypoint, stdin) {
     }, RUNNER_TIMEOUT_MS);
 
     const collect = (stream, chunk) => {
-      const next = stream === 'stdout' ? stdout + chunk : stderr + chunk;
-      const remaining = Math.max(0, MAX_RUNNER_OUTPUT_CHARS - (stream === 'stdout' ? stderr.length : stdout.length));
-      if (stream === 'stdout') stdout = next.slice(0, remaining);
-      else stderr = next.slice(0, remaining);
-      if (next.length > remaining) {
+      // Enforce a combined cap across both stdout and stderr.
+      const combined = stdout.length + stderr.length + chunk.length;
+      if (combined > MAX_RUNNER_OUTPUT_CHARS) {
         outputExceeded = true;
         docker.kill('SIGKILL');
+        return;
       }
+      if (stream === 'stdout') stdout += chunk;
+      else stderr += chunk;
     };
 
     docker.stdout.setEncoding('utf8');
@@ -1993,10 +1994,15 @@ export function createAxomApiMiddleware() {
           return sendJson(res, 400, { error: 'Enter a valid public web page URL.' });
         }
         try {
-          const url = new URL(value);
-          const page = await scrapePublicWebPage(url.toString());
+          let parsedUrl;
+          try {
+            parsedUrl = new URL(value);
+          } catch {
+            return sendJson(res, 400, { error: 'Enter a valid public web page URL.' });
+          }
+          const page = await scrapePublicWebPage(parsedUrl.toString());
           return sendJson(res, 200, {
-            title: page.title || url.hostname,
+            title: page.title || parsedUrl.hostname,
             url: page.url,
             description: page.description,
             author: page.author,
