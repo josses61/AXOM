@@ -652,14 +652,16 @@ async function generateText(messages, maxNewTokens = MAX_NEW_TOKENS) {
   }
 
   if (Array.isArray(generated) && generated.length > 0 && generated.some((message) => message.role === 'assistant' && typeof message.content === 'string' && message.content.includes('Project request'))) {
-    return generated.filter((message) => message.role === 'assistant').at(-1)?.content?.trim() || content.trim();
+    const projectContent = generated.filter((message) => message.role === 'assistant').at(-1)?.content;
+    if (typeof projectContent === 'string' && projectContent.trim()) return projectContent.trim();
   }
 
-  if (typeof content === 'string' && !content.trim()) {
-    throw new Error('The local model returned an empty response.');
+  const finalText = typeof content === 'string' ? content.trim() : '';
+  if (!finalText) {
+    return 'AXOM could not produce a response for that request. Try rephrasing it, simplifying the ask, or checking the backend logs if the local model failed to load.';
   }
 
-  return content.trim();
+  return finalText;
 }
 
 async function loadLearningEntries() {
@@ -1587,6 +1589,9 @@ async function completeWithLocalModel(messages, mode, workspaceFiles = [], deepR
 
 function normalizeProjectFiles(input) {
   if (!Array.isArray(input)) return [];
+  if (input.length > 64) {
+    throw new Error('The workspace contains too many files. Limit it to 64 files.');
+  }
 
   const paths = new Set();
   let totalChars = 0;
@@ -1619,21 +1624,25 @@ function normalizeProjectFiles(input) {
 }
 
 function parseProjectPlan(output) {
-  const start = output.indexOf('{');
-  const end = output.lastIndexOf('}');
+  const text = typeof output === 'string' ? output : '';
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
   if (start < 0 || end <= start) {
     throw new Error('The local model did not return a valid project file plan. Try again with a more specific request.');
   }
 
   let plan;
   try {
-    plan = JSON.parse(output.slice(start, end + 1));
+    plan = JSON.parse(text.slice(start, end + 1));
   } catch {
     throw new Error('The local model returned an unreadable project plan. Try again with a simpler request.');
   }
 
   if (!Array.isArray(plan.files) || plan.files.length === 0) {
     throw new Error('The project plan must contain at least one file. Try describing the project more clearly.');
+  }
+  if (plan.files.length > 64) {
+    throw new Error(`The project plan contains too many files (${plan.files.length}). Limit it to 64 files or narrow the request.`);
   }
 
   const seenPaths = new Set();
@@ -2459,8 +2468,11 @@ export function createAxomApiMiddleware() {
       } catch (error) {
         modelError = getErrorMessage(error);
         console.error('AXOM local model inference failed:', error);
+        const detail = getErrorMessage(error);
         return sendJson(res, 503, {
-          error: 'The local model could not answer. Check the backend logs and try again.',
+          error: detail && detail !== 'The local model could not answer. Check the backend logs and try again.'
+            ? `AXOM could not answer: ${detail}`
+            : 'The local model could not answer. Check the backend logs and try again.',
         });
       }
     });

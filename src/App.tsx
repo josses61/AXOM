@@ -92,9 +92,20 @@ type RunnerResult = {
 };
 
 async function fetchModelHealth(): Promise<ModelHealth> {
-  const response = await fetch('/api/health');
-  if (!response.ok) throw new Error('Model health request failed');
-  return response.json();
+  const response = await fetch('/api/health', { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Model health request failed (${response.status})`);
+
+  const data = (await response.json()) as Partial<ModelHealth> & { status?: string; progress?: unknown; profile?: unknown };
+  const allowed = new Set(['not-loaded', 'switching', 'loading', 'loaded', 'unavailable']);
+  const status = typeof data.status === 'string' && allowed.has(data.status)
+    ? (data.status as ModelHealth['status'])
+    : 'unavailable';
+  const progress = typeof data.progress === 'number' && Number.isFinite(data.progress)
+    ? Math.max(0, Math.min(1, data.progress))
+    : null;
+  const profile = data.profile === 'AXOM1.0' || data.profile === 'AXOM1.1' ? data.profile : undefined;
+
+  return { status, progress, profile };
 }
 
 function isGeneratedFilePayload(value: unknown): value is GeneratedFilePayload {
