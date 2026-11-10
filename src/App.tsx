@@ -100,8 +100,9 @@ async function fetchModelHealth(): Promise<ModelHealth> {
   const status = typeof data.status === 'string' && allowed.has(data.status)
     ? (data.status as ModelHealth['status'])
     : 'unavailable';
+  // Accept either a 0–1 fraction (current API) or a 0–100 percentage (older backend).
   const progress = typeof data.progress === 'number' && Number.isFinite(data.progress)
-    ? Math.max(0, Math.min(1, data.progress))
+    ? Math.max(0, Math.min(1, data.progress > 1 ? data.progress / 100 : data.progress))
     : null;
   const profile = data.profile === 'AXOM1.0' || data.profile === 'AXOM1.1' ? data.profile : undefined;
 
@@ -124,6 +125,7 @@ function isSafeWorkspacePath(path: string): boolean {
 }
 
 const MAX_WORKSPACE_FILES = 64;
+const MAX_AGENT_TEAM = 8;
 const MAX_ARCHIVE_INPUT_BYTES = 20 * 1024 * 1024;
 const MAX_ARCHIVE_OUTPUT_BYTES = 32 * 1024 * 1024;
 const MAX_ASSET_BYTES = 16 * 1024 * 1024;
@@ -301,7 +303,13 @@ function loadManagedTasks(): ManagedTask[] {
       task && typeof task.id === 'string' && typeof task.title === 'string' &&
       typeof task.assigneeId === 'string' &&
       (task.status === 'queued' || task.status === 'in-progress' || task.status === 'done')
-        ? [{ id: task.id, title: task.title.slice(0, 180), assigneeId: task.assigneeId, status: task.status }]
+        ? [{
+          id: task.id,
+          title: task.title.slice(0, 180),
+          assigneeId: task.assigneeId,
+          // A reload cancels the in-page work loop, so resume unfinished work from the queue.
+          status: task.status === 'in-progress' ? 'queued' : task.status,
+        }]
         : [],
     ).slice(0, 100);
   } catch {
@@ -361,9 +369,9 @@ function loadManagedAgents(): ManagedAgent[] {
         }]
         : [],
     );
-    return agents.slice(0, 8);
+    return agents.slice(0, MAX_AGENT_TEAM);
   } catch {
-    return defaultAgents;
+    return defaultAgents.slice(0, MAX_AGENT_TEAM);
   }
 }
 
@@ -446,12 +454,16 @@ function App() {
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState('');
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const agentChatInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef(messages);
   const filesRef = useRef(files);
+  const agentChatsRef = useRef(agentChats);
+  const generationRunningRef = useRef(false);
+  const queueRunningRef = useRef(false);
+  const agentChatRunningRef = useRef(false);
   const activeAgents = agents.filter((agent) => agent.enabled);
   const agentTeams = [...new Set(agents.map((agent) => agent.team.trim()).filter(Boolean))];
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) || activeAgents[0] || agents[0];
-  const selectedAgentMessages = selectedAgent ? agentChats[selectedAgent.id] || [] : [];
   const teamGroups = useMemo(() => {
     return agents.reduce<Record<string, ManagedAgent[]>>((accumulator, agent) => {
       const team = agent.team.trim() || 'Unassigned';
@@ -470,15 +482,16 @@ function App() {
     });
     return rows.sort((left, right) => left.id.localeCompare(right.id)).slice(-80);
   }, [agentChats, agents]);
-  const selectedBoardMessages = selectedAgent
+  const selectedBoardMessages = useMemo(() => selectedAgent
     ? missionBoardMessages.filter((message) => message.team === selectedAgent.team || message.agentName === selectedAgent.name)
-    : missionBoardMessages;
+    : missionBoardMessages,
+  [missionBoardMessages, selectedAgent]);
   const selectedGitHubOwner = githubRepository.split('/')[0] || '';
   const selectedGitHubOwnerTrusted = githubTrustedAuthors.some((author) => author.toLowerCase() === selectedGitHubOwner.toLowerCase());
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [selectedAgentMessages, agentChatBusy]);
+  }, [selectedBoardMessages, agentChatBusy, isLoading]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -487,6 +500,10 @@ function App() {
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
+
+  useEffect(() => {
+    agentChatsRef.current = agentChats;
+  }, [agentChats]);
 
   useEffect(() => {
     localStorage.setItem('axom-agents', JSON.stringify(agents));
@@ -529,7 +546,13 @@ function App() {
 
   const handleQuickPrompt = (text: string) => {
     setPrompt(text);
+    setAgentChatDraft(text);
     setRequestError('');
+    if (!selectedAgent?.enabled) {
+      setAgentsOpen(true);
+      return;
+    }
+    window.requestAnimationFrame(() => agentChatInputRef.current?.focus());
   };
 
   useEffect(() => {
@@ -561,22 +584,32 @@ function App() {
   useEffect(() => {
     if (modelStatus !== 'loading' && modelStatus !== 'switching') return;
     let active = true;
-    const interval = window.setInterval(() => {
-      fetchModelHealth()
-        .then((health) => {
-          if (!active) return;
-          setModelStatus(health.status);
-          setModelProgress(health.progress);
-          if (health.profile) setModelProfile(health.profile);
-        })
-        .catch(() => {
-          if (active) setModelStatus('offline');
-        });
-    }, 1500);
+    let timer: number | undefined;
 
+    // Schedule the next poll only after the current request settles so slow
+    // health checks cannot pile up into an unbounded request loop.
+    const poll = async () => {
+      let nextStatus: ModelStatus = 'offline';
+      try {
+        const health = await fetchModelHealth();
+        if (!active) return;
+        setModelStatus(health.status);
+        setModelProgress(health.progress);
+        if (health.profile) setModelProfile(health.profile);
+        nextStatus = health.status;
+      } catch {
+        if (active) setModelStatus('offline');
+        return;
+      }
+      if (active && (nextStatus === 'loading' || nextStatus === 'switching')) {
+        timer = window.setTimeout(() => void poll(), 1500);
+      }
+    };
+
+    timer = window.setTimeout(() => void poll(), 1500);
     return () => {
       active = false;
-      window.clearInterval(interval);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [modelStatus]);
 
@@ -634,9 +667,17 @@ function App() {
       if (!response.ok) throw new Error(payload.error || 'The model profile could not be changed.');
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'The model profile could not be changed.');
-      // Restore the previous profile so the selector stays in sync.
+      // Restore the previous profile and re-check the backend instead of
+      // assuming the previously loaded model is gone.
       setModelProfile(previousProfile);
-      setModelStatus('unavailable');
+      try {
+        const health = await fetchModelHealth();
+        setModelStatus(health.status);
+        setModelProgress(health.progress);
+      } catch {
+        setModelStatus('offline');
+        setModelProgress(null);
+      }
     }
   };
 
@@ -775,7 +816,7 @@ function App() {
       return `${baseName} ${index}`;
     })();
     const role = template?.role || agentDraftRole.trim();
-    if (!role || agents.length >= 20) return;
+    if (!role || agents.length >= MAX_AGENT_TEAM) return;
     const managerId = agents.some((agent) =>
       agent.id === agentDraftManagerId && agent.team === team && !agent.managerId,
     ) ? agentDraftManagerId : (selectedAgent && selectedAgent.team === team ? selectedAgent.id : '');
@@ -794,39 +835,52 @@ function App() {
   };
 
   const handleRunQueuedTasks = async () => {
-    if (queueBusy || isLoading) return;
+    // Ref guards close the double-click window before React re-renders.
+    if (queueRunningRef.current || generationRunningRef.current || activeAgents.length === 0) return;
     const queuedTasks = tasks.filter((task) => task.status === 'queued');
-    if (queuedTasks.length === 0 || activeAgents.length === 0) return;
+    if (queuedTasks.length === 0) return;
 
+    queueRunningRef.current = true;
     setQueueBusy(true);
-    for (const task of queuedTasks) {
-      const assignee = activeAgents.find((agent) => agent.id === task.assigneeId) || activeAgents[0];
-      setTasks((current) => current.map((item) => item.id === task.id
-        ? { ...item, assigneeId: assignee.id, status: 'in-progress' }
-        : item));
-      const completed = await handleGenerate(
-        `Work item for ${assignee.name} (${assignee.role}): ${task.title}`,
-        assignee.id,
-        true,
-      );
-      setTasks((current) => current.map((item) => item.id === task.id
-        ? { ...item, status: completed ? 'done' : 'queued' }
-        : item));
-      if (!completed) break;
+    try {
+      for (const task of queuedTasks) {
+        const assignee = activeAgents.find((agent) => agent.id === task.assigneeId) || activeAgents[0];
+        setTasks((current) => current.map((item) => item.id === task.id
+          ? { ...item, assigneeId: assignee.id, status: 'in-progress' }
+          : item));
+        const completed = await handleGenerate(
+          `Work item for ${assignee.name} (${assignee.role}): ${task.title}`,
+          assignee.id,
+          true,
+        );
+        setTasks((current) => current.map((item) => item.id === task.id
+          ? { ...item, status: completed ? 'done' : 'queued' }
+          : item));
+        if (!completed) break;
+      }
+    } finally {
+      queueRunningRef.current = false;
+      setQueueBusy(false);
     }
-    setQueueBusy(false);
+  };
+
+  const appendAgentMessages = (agentId: string, messages: AgentChatMessage[]) => {
+    const next = {
+      ...agentChatsRef.current,
+      [agentId]: [...(agentChatsRef.current[agentId] || []), ...messages].slice(-40),
+    };
+    agentChatsRef.current = next;
+    setAgentChats(next);
   };
 
   const handleAgentChatSend = async () => {
     const text = agentChatDraft.trim();
     const chatAgent = selectedAgent;
-    if (!text || !chatAgent || !chatAgent.enabled || agentChatBusy || activeAgents.length === 0) return;
+    if (!text || !chatAgent || !chatAgent.enabled || agentChatRunningRef.current || activeAgents.length === 0) return;
+    agentChatRunningRef.current = true;
     const userMessage: AgentChatMessage = { id: newId(), sender: 'You', role: 'user', text };
-    const conversation = [...(agentChats[chatAgent.id] || []), userMessage].slice(-20);
-    setAgentChats((current) => ({
-      ...current,
-      [chatAgent.id]: [...(current[chatAgent.id] || []), userMessage].slice(-40),
-    }));
+    const conversation = [...(agentChatsRef.current[chatAgent.id] || []), userMessage].slice(-20);
+    appendAgentMessages(chatAgent.id, [userMessage]);
     setAgentChatDraft('');
     setAgentChatBusy(true);
     setAgentChatError('');
@@ -867,6 +921,13 @@ function App() {
           byPath.set(file.name.toLowerCase(), { ...file, id: existing?.id ?? file.id });
         });
         const nextFiles = [...byPath.values()];
+        if (nextFiles.length > MAX_WORKSPACE_FILES) {
+          throw new Error(`The generated project exceeds the ${MAX_WORKSPACE_FILES}-file workspace limit.`);
+        }
+        const oversizedFile = generatedFiles.find((file) => file.value.length > MAX_SOURCE_FILE_CHARS);
+        if (oversizedFile) {
+          throw new Error(`The generated file ${oversizedFile.name} exceeds the ${MAX_SOURCE_FILE_CHARS.toLocaleString()} character file limit.`);
+        }
         if (nextFiles.reduce((total, file) => total + file.value.length, 0) > MAX_SOURCE_CONTEXT_CHARS) {
           throw new Error('The generated project exceeds the 24,000 character source limit.');
         }
@@ -881,33 +942,32 @@ function App() {
           setWorkspaceOpen(true);
         }
       }
-      const agentReplies = (payload.teamMessages || []).flatMap((agentMessage): AgentChatMessage[] =>
-        typeof agentMessage.name === 'string' && typeof agentMessage.text === 'string' && agentMessage.text.trim()
-          ? [{ id: newId(), sender: agentMessage.name, role: 'assistant', text: agentMessage.text.trim() }]
-          : [],
-      );
-      const replies: AgentChatMessage[] = [
+      // The focus agent's report is already represented by the final answer;
+      // keep the other specialists without posting a duplicate reply.
+      const seenReplies = new Set<string>();
+      const agentReplies = (payload.teamMessages || []).flatMap((agentMessage): AgentChatMessage[] => {
+        if (agentMessage.agentId === chatAgent.id) return [];
+        if (typeof agentMessage.name !== 'string' || typeof agentMessage.text !== 'string' || !agentMessage.text.trim()) return [];
+        const key = `${agentMessage.name}\n${agentMessage.text.trim()}`;
+        if (seenReplies.has(key)) return [];
+        seenReplies.add(key);
+        return [{ id: newId(), sender: agentMessage.name, role: 'assistant', text: agentMessage.text.trim() }];
+      });
+      appendAgentMessages(chatAgent.id, [
         ...agentReplies,
         { id: newId(), sender: chatAgent.name, role: 'assistant', text: payload.message.trim() },
-      ];
-      setAgentChats((current) => ({
-        ...current,
-        [chatAgent.id]: [...(current[chatAgent.id] || []), ...replies].slice(-40),
-      }));
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The agent chat request failed.';
       setAgentChatError(message);
-      const reply: AgentChatMessage = {
+      appendAgentMessages(chatAgent.id, [{
         id: newId(),
         sender: 'AXOM',
         role: 'assistant',
         text: `This request could not be completed: ${message}`,
-      };
-      setAgentChats((current) => ({
-        ...current,
-        [chatAgent.id]: [...(current[chatAgent.id] || []), reply].slice(-40),
-      }));
+      }]);
     } finally {
+      agentChatRunningRef.current = false;
       setAgentChatBusy(false);
     }
   };
@@ -956,7 +1016,7 @@ function App() {
 
   const handleGenerate = async (requestOverride?: string, selectedAgentId?: string, fromQueue = false): Promise<boolean> => {
     const request = (requestOverride ?? prompt).trim();
-    if (!request || isLoading || (queueBusy && !fromQueue)) return false;
+    if (!request || generationRunningRef.current || (queueBusy && !fromQueue)) return false;
     const requestAgents = selectedAgentId
       ? agents.filter((agent) => agent.id === selectedAgentId)
       : activeAgents;
@@ -966,6 +1026,8 @@ function App() {
       { id: Date.now(), role: 'user' as const, text: requestText },
     ].slice(-20);
 
+    generationRunningRef.current = true;
+    let backendReached = false;
     setIsLoading(true);
     setRequestError('');
     messagesRef.current = conversation;
@@ -982,6 +1044,7 @@ function App() {
           agents: requestAgents.map(({ id, name, role, managerId, team }) => ({ id, name, role, managerId, team })),
         }),
       });
+      backendReached = true;
 
       let payload: {
         message?: unknown;
@@ -1005,7 +1068,7 @@ function App() {
           ? payload.files.map((file) => ({
             id: `generated-${newId()}`,
             name: file.path,
-            language: file.path.split('.').pop()?.toLowerCase() || 'text',
+            language: getLanguageFromPath(file.path),
             value: file.content,
           }))
           : (() => { throw new Error('AXOM returned an invalid project file list.'); })();
@@ -1023,19 +1086,30 @@ function App() {
           byPath.set(file.name.toLowerCase(), { ...file, id: existing?.id ?? file.id });
         });
         const nextFiles = [...byPath.values()];
+        if (nextFiles.length > MAX_WORKSPACE_FILES) {
+          throw new Error(`The generated project exceeds the ${MAX_WORKSPACE_FILES}-file workspace limit.`);
+        }
+        const oversizedFile = generatedFiles.find((file) => file.value.length > MAX_SOURCE_FILE_CHARS);
+        if (oversizedFile) {
+          throw new Error(`The generated file ${oversizedFile.name} exceeds the ${MAX_SOURCE_FILE_CHARS.toLocaleString()} character file limit.`);
+        }
+        if (nextFiles.reduce((total, file) => total + file.value.length, 0) > MAX_SOURCE_CONTEXT_CHARS) {
+          throw new Error('The generated project exceeds the 24,000 character source limit.');
+        }
         filesRef.current = nextFiles;
         setFiles(nextFiles);
         setAssets((current) => current.filter((asset) =>
           !generatedFiles.some((file) => file.name.toLowerCase() === asset.name.toLowerCase()),
         ));
-        const existingSelectedFile = filesRef.current.find(
+        const existingSelectedFile = nextFiles.find(
           (file) => file.name.toLowerCase() === generatedFiles[0].name.toLowerCase(),
         );
         setSelectedFile(existingSelectedFile?.id ?? generatedFiles[0].id);
       }
       setPrompt('');
       setModelStatus('loaded');
-      setModelProgress(100);
+      // Health progress is expressed as a 0–1 fraction.
+      setModelProgress(1);
       return true;
     } catch (error) {
       const message = error instanceof TypeError
@@ -1044,9 +1118,22 @@ function App() {
           ? error.message
           : 'AXOM could not run the local model.';
       setRequestError(message);
-      setModelStatus(error instanceof TypeError ? 'offline' : 'unavailable');
+      // An HTTP error means the backend answered; re-check the model state
+      // instead of assuming the loaded model has disappeared.
+      if (backendReached) {
+        try {
+          const health = await fetchModelHealth();
+          setModelStatus(health.status);
+          setModelProgress(health.progress);
+        } catch {
+          setModelStatus('unavailable');
+        }
+      } else {
+        setModelStatus(error instanceof TypeError ? 'offline' : 'unavailable');
+      }
       return false;
     } finally {
+      generationRunningRef.current = false;
       setIsLoading(false);
     }
   };
@@ -1059,6 +1146,19 @@ function App() {
   };
 
   const handleEditorChange = (value: string) => {
+    const otherSourceChars = files.reduce(
+      (total, file) => total + (file.id === selectedFile ? 0 : file.value.length),
+      0,
+    );
+    if (value.length > MAX_SOURCE_FILE_CHARS) {
+      setRequestError(`Each editable file must stay within ${MAX_SOURCE_FILE_CHARS.toLocaleString()} characters.`);
+      return;
+    }
+    if (otherSourceChars + value.length > MAX_SOURCE_CONTEXT_CHARS) {
+      setRequestError(`Editable source must stay within ${MAX_SOURCE_CONTEXT_CHARS.toLocaleString()} characters.`);
+      return;
+    }
+    setRequestError('');
     setRunnerResult(null);
     setFiles((prev) =>
       prev.map((file) =>
@@ -1120,20 +1220,35 @@ function App() {
       runnerResult.timedOut ? 'The runner reported that execution timed out.' : '',
       runnerResult.outputExceeded ? 'The runner output exceeded its limit.' : '',
     ].filter(Boolean).join('\n\n');
-    setPrompt((current) => current.trim() ? `${current.trim()}\n\n${details}` : details);
+    const nextPrompt = (current: string) => current.trim() ? `${current.trim()}\n\n${details}` : details;
+    setPrompt(nextPrompt);
+    setAgentChatDraft(nextPrompt);
+    window.requestAnimationFrame(() => agentChatInputRef.current?.focus());
   };
 
   const handleNewFile = () => {
     const [extension] = newFileTypes.find(([candidate]) => candidate === newFileExtension) ?? newFileTypes[0];
-    const id = `file-${Date.now()}`;
-    const name = `module-${files.length + 1}.${extension}`;
+    if (files.length + assets.length >= MAX_WORKSPACE_FILES) {
+      setRequestError(`The workspace can contain up to ${MAX_WORKSPACE_FILES} files.`);
+      return;
+    }
+    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const usedNames = new Set(files.map((file) => file.name.toLowerCase()));
+    let index = files.length + 1;
+    while (usedNames.has(`module-${index}.${extension}`.toLowerCase())) index += 1;
+    const name = `module-${index}.${extension}`;
+    const value = extension === 'tsx'
+      ? `export default function Module() {\n  return <section>New AXON module</section>;\n}`
+      : '';
+    if (files.reduce((total, file) => total + file.value.length, 0) + value.length > MAX_SOURCE_CONTEXT_CHARS) {
+      setRequestError('The workspace source would exceed the 24,000 character limit.');
+      return;
+    }
     const file: FileItem = {
       id,
       name,
       language: getLanguageFromPath(name),
-      value: extension === 'tsx'
-        ? `export default function Module() {\n  return <section>New AXON module</section>;\n}`
-        : '',
+      value,
     };
 
     setFiles((prev) => [...prev, file]);
@@ -1351,7 +1466,7 @@ function App() {
               aria-atomic="true"
             >
               {(modelStatus === 'loading' || modelStatus === 'switching') && modelProgress !== null
-                ? `Loading model ${modelProgress}%`
+                ? `Loading model ${Math.round(modelProgress * 100)}%`
                 : modelStatus === 'loading' || modelStatus === 'switching'
                   ? 'Loading model'
                   : modelStatus === 'not-loaded'
@@ -1391,6 +1506,7 @@ function App() {
                 <span>{agents.length} active agents</span>
                 <span>{Object.keys(teamGroups).length} teams</span>
                 <span>{tasks.filter((task) => task.status === 'done').length} completed tasks</span>
+                {isLoading && <span role="status">Generating…</span>}
               </div>
             </div>
             <div className="top-actions">
@@ -1398,7 +1514,7 @@ function App() {
                 Package ZIP
               </button>
               <button className="primary" type="button" onClick={() => void handleRunQueuedTasks()} disabled={queueBusy || isLoading || !tasks.some((task) => task.status === 'queued') || activeAgents.length === 0}>
-                Run queue
+                {queueBusy ? 'Running queue…' : 'Run queue'}
               </button>
               <button className="ghost" type="button" onClick={() => setWorkspaceOpen((open) => !open)}>
                 {workspaceOpen ? 'Hide build' : 'Open build'}
@@ -1946,6 +2062,7 @@ function App() {
                 className="workspace-editor"
                 value={currentFile.value}
                 onChange={(event) => handleEditorChange(event.target.value)}
+                maxLength={MAX_SOURCE_FILE_CHARS}
                 spellCheck={false}
                 aria-label={`Code editor for ${currentFile.name}`}
               />

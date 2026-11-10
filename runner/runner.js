@@ -40,15 +40,16 @@ function run(command, args, cwd, stdin = '') {
     let timedOut = false;
     let outputExceeded = false;
     const killProcessGroup = () => {
-      if (!child.pid) {
-        child.kill('SIGKILL');
-        return;
-      }
+      if (!child.pid) return;
       try {
         process.kill(-child.pid, 'SIGKILL');
       } catch (error) {
         if (error instanceof Error && error.code === 'ESRCH') return;
-        throw error;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // The process already exited.
+        }
       }
     };
     const timeout = setTimeout(() => {
@@ -72,8 +73,15 @@ function run(command, args, cwd, stdin = '') {
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => collect('stdout', chunk));
     child.stderr.on('data', (chunk) => collect('stderr', chunk));
+    child.stdin.on('error', () => {
+      // The program may exit before reading its input; that is not a runner failure.
+    });
     child.stdin.end(stdin);
-    child.once('error', reject);
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      killProcessGroup();
+      reject(error);
+    });
     child.once('close', (code, signal) => {
       clearTimeout(timeout);
       resolve({ code, signal, stdout, stderr, timedOut, outputExceeded });
@@ -95,6 +103,9 @@ try {
 
   let totalChars = 0;
   const files = new Map();
+  if (request.files.length > 64) {
+    throw new Error('Workspace exceeds the 64-file runner limit.');
+  }
   for (const file of request.files) {
     if (!file || !isSafePath(file.path) || typeof file.content !== 'string') {
       throw new Error('A workspace file has an invalid path or content.');
@@ -117,11 +128,22 @@ try {
     await writeFile(destination, content, { encoding: 'utf8', mode: 0o600 });
   }
 
+  const entrypointSource = files.get(request.entrypoint);
+  let javaMainClass = targetBase;
+  if (extension === '.java') {
+    const packageMatch = entrypointSource.match(
+      /(?:^|\n)\s*package\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*;/,
+    );
+    if (packageMatch) javaMainClass = `${packageMatch[1]}.${targetBase}`;
+  }
+  const cppCompiler = ['g++', ['-O0', '-std=c++17', target, '-o', '/tmp/axon-program'], ['/tmp/axon-program']];
   const compilers = {
     '.c': ['gcc', ['-O0', '-std=c11', target, '-o', '/tmp/axon-program'], ['/tmp/axon-program']],
-    '.cpp': ['g++', ['-O0', '-std=c++17', target, '-o', '/tmp/axon-program'], ['/tmp/axon-program']],
-    '.go': ['go', ['run', target], null],
-    '.java': ['javac', ['-d', '/tmp', target], ['java', '-cp', '/tmp', targetBase]],
+    '.cc': cppCompiler,
+    '.cpp': cppCompiler,
+    '.cxx': cppCompiler,
+    '.go': ['go', ['build', '-o', '/tmp/axon-program', target], ['/tmp/axon-program']],
+    '.java': ['javac', ['-d', '/tmp', target], ['java', '-cp', '/tmp', javaMainClass]],
     '.rs': ['rustc', [target, '-o', '/tmp/axon-program'], ['/tmp/axon-program']],
   };
   const interpreted = {
