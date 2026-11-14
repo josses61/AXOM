@@ -1,5 +1,7 @@
 # AXOM — Local coding assistant
 
+<img src="docs/banner.png" alt="AXOM - a local coding assistant that runs the code it generates in a Docker sandbox" width="100%">
+
 AXOM is a local-first AI coding assistant. You describe what you want in one prompt, AXOM
 generates the project files into an editable workspace, and then runs the result for you in an
 isolated Docker sandbox. The model runs on your machine — no API key, no cloud, no telemetry.
