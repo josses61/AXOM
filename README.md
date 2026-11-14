@@ -1,5 +1,7 @@
 # AXOM — Local coding assistant
 
+> **Project hub** - all three of my local-first tools in one place: https://josses61-local-first-ai-developer-tools-axom-exu9s4g2a2.openbot.site
+
 <img src="docs/banner.png" alt="AXOM - a local coding assistant that runs the code it generates in a Docker sandbox" width="100%">
 
 AXOM is a local-first AI coding assistant. You describe what you want in one prompt, AXOM
